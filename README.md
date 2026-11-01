@@ -66,6 +66,7 @@ Ainda não há altura de terreno, cobertura parcial, dispersão de projéteis, f
 - `src/ui.ts` e `src/style.css`: interface em português, atributos, fila, controles, ajuda e resultados.
 - `public/assets/`: bustos, obstáculos e ícones SVG originais provisórios.
 - `public/fonts/`: fontes locais e respectivas licenças.
+- `docs/design-combate.md`: design do combate com líderes, pelotões e ordens. Ainda não implementado.
 
 O estado de inspeção `window.__combat` existe somente no servidor de desenvolvimento, para testes de integração. A compilação de produção não o expõe.
 
