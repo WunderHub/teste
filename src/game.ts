@@ -79,7 +79,8 @@ function roll(s: BattleState, low: number, high: number): number {
 }
 const tileAt = (s: BattleState, h: Hex): Tile | undefined => s.tiles.find(t => same(t, h));
 const occupant = (s: BattleState, h: Hex): Unit | undefined => s.units.find(u => alive(u) && same(u.pos, h));
-const moveAp = (tile: Tile): number => tile.terrain === 'rough' ? 3 : 2;
+/** AP cost to enter a tile; movement fatigue is always twice this. */
+export const moveAp = (tile: Tile): number => tile.terrain === 'rough' ? 3 : 2;
 const moraleFactor = (u: Unit): number => u.morale === 4 ? 1.1 : 0.7 + u.morale * 0.1;
 const adjacentEnemies = (s: BattleState, u: Unit, at = u.pos): Unit[] => s.units.filter(v =>
   alive(v) && v.team !== u.team && distance(v.pos, at) === 1);

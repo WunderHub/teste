@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { createBattle, getActive, key, distance, reachable, previewAttack, move, attack, waitTurn, endTurn, performAiAction, type BattleState, type Unit, type Hex, type ActionResult, type BattleEvent } from './game';
+import { createBattle, getActive, key, distance, reachable, moveAp, previewAttack, move, attack, waitTurn, endTurn, performAiAction, type BattleState, type Unit, type Hex, type ActionResult, type BattleEvent } from './game';
 import { CombatUI, type UIView } from './ui';
 
 const W = 1440, H = 900, R = 40;
@@ -193,7 +193,7 @@ export class CombatScene extends Phaser.Scene {
       const tile = this.state.tiles.find(t => key(t) === key(hit.hex!)), path = this.pathMap.get(key(hit.hex));
       if (tile?.obstacle) tip = 'Obstáculo · bloqueia passagem e visão';
       else if (path && this.view.mode === 'move') {
-        const ap = path.reduce((sum, step) => sum + (this.state.tiles.find(t => key(t) === key(step))?.terrain === 'rough' ? 3 : 2), 0);
+        const ap = path.reduce((sum, step) => sum + moveAp(this.state.tiles.find(t => key(t) === key(step))!), 0);
         tip = `Mover · ${path.length} ${path.length === 1 ? 'hexágono' : 'hexágonos'}\n${ap} PA · +${ap * 2} fadiga`;
         const departures = [active!.pos, ...path.slice(0, -1)];
         if (this.state.units.some(u => u.team !== active?.team && !u.dead && !u.escaped && u.weapon.kind === 'melee' && u.morale > 0 && departures.some(pos => distance(pos, u.pos) === 1))) tip += '\nEste caminho pode provocar um ataque.';
