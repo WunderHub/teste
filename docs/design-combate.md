@@ -2,7 +2,7 @@
 
 Documento vivo do combate de *Vale do Sal*. Versão 0.1, de 1º de novembro de 2026.
 
-Ele registra o que o chefe (Kauê) já decidiu e propõe como preencher o que ainda falta. **Nada daqui está implementado ainda.** O protótipo atual (`src/game.ts`) continua sendo o combate de 3 contra 4 descrito no README.
+Ele registra o que o chefe (Kauê) já decidiu e propõe como preencher o que ainda falta. **Só a fase 1 está implementada** (veja a [seção 11](#11-ponte-com-o-protótipo-atual)): líderes, subclasses, pelotões, nota de atributo, mapa maior com câmera e a batalha de teste de 20 contra 20.
 
 ## Como ler este documento
 
@@ -317,7 +317,7 @@ Decide as ordens, o movimento do próprio líder e as transferências de tropas.
 
 **Fases sugeridas**:
 
-1. Modelo de dados (líder, tropa, pelotão, nota de atributo), mapa maior com câmera e um encontro de teste de 20 contra 20, com 1 líder por lado.
+1. ✅ Modelo de dados (líder, tropa, pelotão, nota de atributo), mapa maior com câmera e um encontro de teste de 20 contra 20, com 1 líder por lado. Até a fase 2, as tropas usam a IA antiga: avançam e atacam o inimigo mais próximo.
 2. Aba de comando: ordens, PL, recarga, alcance e a IA de tropa seguindo ordens.
 3. Vez de grupo e passagem para iniciativa no contato.
 4. Regra de 20 por líder (Sobrecarregado e Pressão de liderança), transferências, sucessão e comandante interino.
@@ -353,3 +353,4 @@ Cada pergunta já tem uma proposta. Se o chefe não mudar, a proposta vale.
 ## Histórico
 
 - **0.1 (2026-11-01)**: primeira versão, a partir das conversas com o chefe no projeto.
+- **0.2 (2026-11-01)**: fase 1 implementada.

@@ -1,9 +1,13 @@
 /** Pure, deterministic combat rules. Coordinates are odd-r offset (q=column, r=row). */
-export const BOARD_WIDTH = 15;
-export const BOARD_HEIGHT = 9;
-
 export interface Hex { q: number; r: number }
 export type Team = 'ally' | 'enemy';
+/** Only leaders take player commands; troops are always driven by the AI. */
+export type Role = 'leader' | 'troop';
+export type LeaderClass = 'combate' | 'estrategico' | 'encorajador';
+/** Order groups inside a platoon: bows and crossbows are archers, everyone else is a warrior. */
+export type Division = 'guerreiros' | 'arqueiros';
+export type UnitAsset = 'iria' | 'tome' | 'nara' | 'raider' | 'husk' | 'captain' | 'warlord';
+export type EncounterId = 'emboscada' | 'campo-aberto';
 export interface Tile extends Hex {
   terrain: 'grass' | 'rough';
   obstacle?: 'rocks' | 'ruin' | 'deadtree';
@@ -25,7 +29,12 @@ export interface Weapon {
 }
 export interface Unit {
   id: string; name: string; team: Team;
-  asset: 'iria' | 'tome' | 'nara' | 'raider' | 'husk';
+  asset: UnitAsset;
+  role: Role;
+  leaderClass?: LeaderClass;
+  /** The player's own character, the faction's Líder Supremo. */
+  supreme?: boolean;
+  platoonId?: string;
   pos: Hex; hp: number; maxHp: number;
   headArmor: number; maxHeadArmor: number;
   bodyArmor: number; maxBodyArmor: number;
@@ -36,8 +45,14 @@ export interface Unit {
   morale: 0 | 1 | 2 | 3 | 4;
   weapon: Weapon; dead: boolean; escaped: boolean; waited: boolean;
 }
+/** A leader and the troops assigned to them. leaderId is null once the leader falls. */
+export interface Platoon { id: string; team: Team; name: string; leaderId: string | null }
 export interface BattleState {
+  encounter: EncounterId;
+  /** Board size in hexes. Tiles are stored row by row, so a tile's index is r * width + q. */
+  width: number; height: number;
   seed: number; round: number; tiles: Tile[]; units: Unit[]; queue: string[];
+  platoons: Platoon[];
   outcome: 'ongoing' | 'victory' | 'defeat'; log: string[];
   rngState: number;
   activatedRound: Record<string, number>;
@@ -77,7 +92,8 @@ function roll(s: BattleState, low: number, high: number): number {
   s.rngState = n >>> 0;
   return low + Math.floor((s.rngState / 4294967296) * (high - low + 1));
 }
-const tileAt = (s: BattleState, h: Hex): Tile | undefined => s.tiles.find(t => same(t, h));
+export const tileAt = (s: BattleState, h: Hex): Tile | undefined =>
+  h.q >= 0 && h.q < s.width && h.r >= 0 && h.r < s.height ? s.tiles[h.r * s.width + h.q] : undefined;
 const occupant = (s: BattleState, h: Hex): Unit | undefined => s.units.find(u => alive(u) && same(u.pos, h));
 /** AP cost to enter a tile; movement fatigue is always twice this. */
 export const moveAp = (tile: Tile): number => tile.terrain === 'rough' ? 3 : 2;
@@ -95,7 +111,6 @@ export function getActive(s: BattleState): Unit | undefined {
 export function reachable(s: BattleState, unit: Unit): Map<string, Hex[]> {
   const paths = new Map<string, Hex[]>();
   if (!alive(unit) || s.outcome !== 'ongoing') return paths;
-  const tiles = new Map(s.tiles.map(t => [key(t), t]));
   const occupied = new Set(s.units.filter(u => alive(u) && u.id !== unit.id).map(u => key(u.pos)));
   const best = new Map<string, number>([[key(unit.pos), 0]]);
   const pending: { hex: Hex; cost: number; path: Hex[] }[] = [{ hex: unit.pos, cost: 0, path: [] }];
@@ -104,7 +119,7 @@ export function reachable(s: BattleState, unit: Unit): Map<string, Hex[]> {
     const current = pending.shift()!;
     if (current.cost !== best.get(key(current.hex))) continue;
     for (const hex of neighbors(current.hex)) {
-      const k = key(hex), tile = tiles.get(k);
+      const k = key(hex), tile = tileAt(s, hex);
       if (!tile || tile.obstacle || occupied.has(k)) continue;
       const cost = current.cost + moveAp(tile);
       if (cost > unit.ap || unit.fatigue + cost * 2 > unit.maxFatigue || cost >= (best.get(k) ?? Infinity)) continue;
@@ -175,8 +190,16 @@ function checkOutcome(s: BattleState, events: BattleEvent[]): boolean {
   if (allies && enemies) return false;
   s.outcome = allies ? 'victory' : 'defeat';
   s.queue = [];
-  emit(s, events, { type: 'info', message: allies ? 'Vitória. O caminho está livre.' : 'Derrota. A companhia caiu.' });
+  emit(s, events, { type: 'info', message: allies ? 'Vitória. O campo é nosso.' : 'Derrota. Nossas tropas caíram.' });
   return true;
+}
+
+/** A leader who falls or leaves the field stops leading. Succession rules come in a later phase. */
+function releasePlatoon(s: BattleState, unit: Unit, events: BattleEvent[]): void {
+  const platoon = s.platoons.find(p => p.leaderId === unit.id);
+  if (!platoon) return;
+  platoon.leaderId = null;
+  emit(s, events, { type: 'info', unitId: unit.id, message: `${platoon.name} ficou sem líder.` });
 }
 
 /** Morale events use Resolve, nearby allies/enemies and wounds; no campaign mood or perks yet. */
@@ -222,6 +245,7 @@ function resolveStrike(s: BattleState, unit: Unit, target: Unit, events: BattleE
     target.dead = true;
     s.queue = s.queue.filter(id => id !== target.id);
     emit(s, events, { type: 'death', unitId: target.id, message: `${target.name} caiu.` });
+    releasePlatoon(s, target, events);
     for (const other of s.units.filter(alive)) {
       if (distance(other.pos, target.pos) <= 6) moraleCheck(s, other, other.team !== target.team, events);
     }
@@ -340,12 +364,13 @@ export function endTurn(s: BattleState): ActionResult {
   return done(events, `${unit.name} encerrou o turno.`);
 }
 
-const edgeDistance = (p: Hex): number => Math.min(p.q, BOARD_WIDTH - 1 - p.q, p.r, BOARD_HEIGHT - 1 - p.r);
+const edgeDistance = (s: BattleState, p: Hex): number => Math.min(p.q, s.width - 1 - p.q, p.r, s.height - 1 - p.r);
 function escape(s: BattleState, unit: Unit): ActionResult {
   unit.escaped = true;
   s.queue = s.queue.filter(id => id !== unit.id);
   const events: BattleEvent[] = [];
   emit(s, events, { type: 'flee', unitId: unit.id, message: `${unit.name} foge do campo.` });
+  releasePlatoon(s, unit, events);
   for (const ally of s.units.filter(u => alive(u) && u.team === unit.team && distance(u.pos, unit.pos) <= 6)) moraleCheck(s, ally, false, events);
   normalizeQueue(s, events, unit.id);
   return done(events);
@@ -360,12 +385,12 @@ export function performAiAction(s: BattleState): ActionResult {
     const events: BattleEvent[] = []; checkOutcome(s, events); return done(events);
   }
   if (unit.morale === 0) {
-    if (edgeDistance(unit.pos) === 0) return escape(s, unit);
+    if (edgeDistance(s, unit.pos) === 0) return escape(s, unit);
     const routes = [...reachable(s, unit).values()];
-    routes.sort((a, b) => edgeDistance(a.at(-1)!) - edgeDistance(b.at(-1)!)
+    routes.sort((a, b) => edgeDistance(s, a.at(-1)!) - edgeDistance(s, b.at(-1)!)
       || Math.min(...enemies.map(e => distance(e.pos, b.at(-1)!))) - Math.min(...enemies.map(e => distance(e.pos, a.at(-1)!)))
       || a.length - b.length);
-    const route = routes.find(p => edgeDistance(p.at(-1)!) < edgeDistance(unit.pos));
+    const route = routes.find(p => edgeDistance(s, p.at(-1)!) < edgeDistance(s, unit.pos));
     if (route) return moveInternal(s, route.at(-1)!, true);
     return endTurn(s);
   }
@@ -395,9 +420,28 @@ export function performAiAction(s: BattleState): ActionResult {
   return chosen ? move(s, chosen) : endTurn(s);
 }
 
-function makeUnit(id: string, name: string, team: Team, asset: Unit['asset'], pos: Hex,
+const LEADER_CLASSES: Record<LeaderClass, { label: string; attributes: number }> = {
+  combate: { label: 'Líder de Combate', attributes: 1.2 },
+  estrategico: { label: 'Líder Estratégico', attributes: 0.85 },
+  encorajador: { label: 'Líder Encorajador', attributes: 1 },
+};
+const BASE_ATTRIBUTES = ['hp', 'maxFatigue', 'resolve', 'initiative', 'meleeSkill', 'rangedSkill', 'meleeDefense', 'rangedDefense'] as const;
+
+export const leaderClassLabel = (leaderClass: LeaderClass): string => LEADER_CLASSES[leaderClass].label;
+export const divisionOf = (u: Unit): Division => u.weapon.kind === 'ranged' ? 'arqueiros' : 'guerreiros';
+/** The player commands only their own leaders, and only while those leaders hold their nerve. */
+export const isPlayerControlled = (u: Unit): boolean => u.team === 'ally' && u.role === 'leader' && alive(u) && u.morale > 0;
+export const platoonOf = (s: BattleState, u: Unit): Platoon | undefined => s.platoons.find(p => p.id === u.platoonId);
+export const platoonTroops = (s: BattleState, platoonId: string): Unit[] =>
+  s.units.filter(u => alive(u) && u.role === 'troop' && u.platoonId === platoonId);
+/** Nota de atributo: the sum of the eight base attributes, without equipment or wounds. */
+export function attributeScore(u: Unit): number {
+  return u.maxHp + u.maxFatigue + u.resolve + u.initiative + u.meleeSkill + u.rangedSkill + u.meleeDefense + u.rangedDefense;
+}
+
+export function makeUnit(id: string, name: string, team: Team, asset: UnitAsset, pos: Hex,
   weapon: Weapon, stats: Partial<Unit>): Unit {
-  const u: Unit = { id, name, team, asset, pos, weapon: { ...weapon }, hp: 60, maxHp: 60,
+  const u: Unit = { id, name, team, asset, role: 'troop', pos, weapon: { ...weapon }, hp: 60, maxHp: 60,
     headArmor: 40, maxHeadArmor: 40, bodyArmor: 60, maxBodyArmor: 60,
     ap: 9, maxAp: 9, fatigue: 0, maxFatigue: 90, initiative: 85,
     meleeSkill: 60, rangedSkill: 45, meleeDefense: 5, rangedDefense: 4, resolve: 48,
@@ -405,44 +449,31 @@ function makeUnit(id: string, name: string, team: Team, asset: Unit['asset'], po
   u.maxHp = u.hp; u.maxHeadArmor = u.headArmor; u.maxBodyArmor = u.bodyArmor;
   return u;
 }
-
-export function createBattle(seed = 17431): BattleState {
-  const mace: Weapon = { name: 'Maça de vigília', kind: 'melee', minDamage: 30, maxDamage: 45,
-    armorDamage: 1.1, penetration: 0.4, ap: 4, fatigue: 13, range: 1, accuracy: 0 };
-  const spear: Weapon = { name: 'Lança de ferro', kind: 'melee', minDamage: 25, maxDamage: 35,
-    armorDamage: 0.8, penetration: 0.25, ap: 4, fatigue: 10, range: 1, accuracy: 20 };
-  const bow: Weapon = { name: 'Arco de freixo', kind: 'ranged', minDamage: 35, maxDamage: 50,
-    armorDamage: 0.65, penetration: 0.35, ap: 4, fatigue: 15, range: 6, accuracy: 0 };
-  const cleaver: Weapon = { name: 'Lâmina lascada', kind: 'melee', minDamage: 28, maxDamage: 40,
-    armorDamage: 0.85, penetration: 0.25, ap: 4, fatigue: 12, range: 1, accuracy: 0 };
+/** The subclass scales the eight base attributes; stats are the standard values before that. */
+export function makeLeader(id: string, name: string, team: Team, asset: UnitAsset, pos: Hex, weapon: Weapon,
+  leaderClass: LeaderClass, stats: Partial<Unit>, supreme = false): Unit {
+  const u = makeUnit(id, name, team, asset, pos, weapon, { ...stats, role: 'leader', leaderClass, ...(supreme ? { supreme } : {}) });
+  for (const attribute of BASE_ATTRIBUTES) u[attribute] = Math.round(u[attribute] * LEADER_CLASSES[leaderClass].attributes);
+  u.maxHp = u.hp;
+  return u;
+}
+export function makeTiles(width: number, height: number, terrain: (q: number, r: number) => Tile['terrain'] = () => 'grass'): Tile[] {
   const tiles: Tile[] = [];
-  for (let r = 0; r < BOARD_HEIGHT; r++) for (let q = 0; q < BOARD_WIDTH; q++) {
-    tiles.push({ q, r, terrain: ((q === 6 || q === 7) && r >= 3 && r <= 5) || (r === 7 && q > 9) ? 'rough' : 'grass' });
-  }
-  const obstacles: [number, number, Tile['obstacle']][] = [
-    [1, 1, 'deadtree'], [5, 1, 'rocks'], [7, 2, 'ruin'], [6, 6, 'ruin'],
-    [9, 6, 'rocks'], [12, 1, 'deadtree'], [12, 7, 'deadtree'], [2, 7, 'rocks'],
-  ];
-  for (const [q, r, obstacle] of obstacles) tiles.find(t => t.q === q && t.r === r)!.obstacle = obstacle;
-  const units = [
-    makeUnit('iria', 'Íria', 'ally', 'iria', { q: 3, r: 3 }, mace,
-      { hp: 68, headArmor: 80, bodyArmor: 110, meleeSkill: 69, meleeDefense: 18, rangedDefense: 15, resolve: 65, initiative: 98 }),
-    makeUnit('tome', 'Tomé', 'ally', 'tome', { q: 3, r: 5 }, spear,
-      { hp: 62, headArmor: 55, bodyArmor: 80, meleeSkill: 64, meleeDefense: 10, resolve: 57, initiative: 108 }),
-    makeUnit('nara', 'Nara', 'ally', 'nara', { q: 2, r: 4 }, bow,
-      { hp: 52, headArmor: 30, bodyArmor: 45, meleeSkill: 38, rangedSkill: 78, resolve: 55, initiative: 118 }),
-    makeUnit('raider-1', 'Saqueador', 'enemy', 'raider', { q: 8, r: 3 }, cleaver,
-      { hp: 54, headArmor: 35, bodyArmor: 55, meleeSkill: 57, resolve: 42, initiative: 82 }),
-    makeUnit('husk-1', 'Penitente', 'enemy', 'husk', { q: 9, r: 5 }, cleaver,
-      { hp: 65, headArmor: 20, bodyArmor: 35, meleeSkill: 53, resolve: 46, initiative: 72 }),
-    makeUnit('husk-2', 'Flagelante', 'enemy', 'husk', { q: 9, r: 2 }, spear,
-      { hp: 55, headArmor: 25, bodyArmor: 40, meleeSkill: 50, resolve: 40, initiative: 78 }),
-    makeUnit('raider-bow', 'Arqueiro proscrito', 'enemy', 'raider', { q: 11, r: 4 }, bow,
-      { hp: 45, headArmor: 15, bodyArmor: 30, rangedSkill: 63, resolve: 38, initiative: 92 }),
-  ];
+  for (let r = 0; r < height; r++) for (let q = 0; q < width; q++) tiles.push({ q, r, terrain: terrain(q, r) });
+  return tiles;
+}
+
+export interface BattleSetup {
+  encounter: EncounterId; width: number; height: number;
+  tiles: Tile[]; units: Unit[]; platoons?: Platoon[];
+}
+export function startBattle(seed: number, setup: BattleSetup): BattleState {
+  const { encounter, width, height, tiles, units, platoons = [] } = setup;
+  if (tiles.length !== width * height || tiles.some((t, i) => t.q !== i % width || t.r !== Math.floor(i / width)))
+    throw new Error('Tiles must cover the board row by row.');
   const normalizedSeed = seed >>> 0 || 1;
-  const s: BattleState = { seed: normalizedSeed, rngState: normalizedSeed, round: 0, tiles, units, queue: [],
-    outcome: 'ongoing', log: [], activatedRound: {}, waitPenaltyNextRound: {}, adjacentThreats: {} };
+  const s: BattleState = { encounter, width, height, seed: normalizedSeed, rngState: normalizedSeed, round: 0, tiles, units, platoons,
+    queue: [], outcome: 'ongoing', log: [], activatedRound: {}, waitPenaltyNextRound: {}, adjacentThreats: {} };
   for (const u of units) s.adjacentThreats[u.id] = adjacentEnemies(s, u).length;
   startRound(s, []);
   return s;

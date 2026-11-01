@@ -1,4 +1,5 @@
-import type { BattleState } from './game';
+import { attributeScore, divisionOf, isPlayerControlled, leaderClassLabel, platoonOf, platoonTroops, type BattleState } from './game';
+import { ENCOUNTER_NAMES } from './encounters';
 
 type BattleUnit = BattleState['units'][number];
 
@@ -8,6 +9,7 @@ export interface UIActions {
   onEnd: () => void;
   onRestart: () => void;
   onPause: () => void;
+  onSpeed: () => void;
   onHelp: () => void;
   onCloseHelp: () => void;
 }
@@ -17,6 +19,8 @@ export interface UIView {
   paused: boolean;
   helpOpen: boolean;
   busy: boolean;
+  /** Animation and AI pacing multiplier. */
+  speed: 1 | 2 | 4;
   hoveredId?: string;
   message: string;
   preview?: {
@@ -32,6 +36,22 @@ const MORALE = ['Em fuga', 'Em pânico', 'Abalado', 'Firme', 'Confiante'] as con
 const assetUrl = (name: string) => `${import.meta.env.BASE_URL}assets/${name}.svg`;
 const icon = (name: string, className = '') => `<img class="ui-icon ${className}" src="${assetUrl(name)}" alt="" draggable="false">`;
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+/** Queue tokens that fit above the action dock; the rest collapse into a "+N" counter. */
+const QUEUE_LIMIT = 8;
+
+/** Who this unit is in the chain of command, e.g. "Guerreiro · segue Líder Supremo · nota 412". */
+function roleLine(state: BattleState, unit: BattleUnit): string {
+  const score = `nota ${attributeScore(unit)}`;
+  if (unit.role === 'leader' && unit.leaderClass) {
+    const troops = unit.platoonId ? platoonTroops(state, unit.platoonId).length : 0;
+    return `${leaderClassLabel(unit.leaderClass)} · ${troops} ${troops === 1 ? 'tropa' : 'tropas'} · ${score}`;
+  }
+  const kind = divisionOf(unit) === 'arqueiros' ? 'Arqueiro' : 'Guerreiro';
+  const platoon = platoonOf(state, unit);
+  if (!platoon) return `${kind} · ${score}`;
+  const leader = state.units.find(u => u.id === platoon.leaderId);
+  return `${kind} · ${leader ? `segue ${leader.name}` : 'sem líder'} · ${score}`;
+}
 
 /** DOM controls over the Phaser field. Scene updates do not recreate the HUD. */
 export class CombatUI {
@@ -39,6 +59,7 @@ export class CombatUI {
   private readonly nodes = new Map<string, HTMLElement>();
   private readonly queueNodes = new Map<string, HTMLLIElement>();
   private queueOrder = '';
+  private readonly moreToken = Object.assign(document.createElement('li'), { className: 'turn-more' });
   private previousModal: HTMLElement | null = null;
   private focusBeforeModal: HTMLElement | null = null;
 
@@ -47,19 +68,20 @@ export class CombatUI {
     this.element.className = 'combat-ui';
     this.element.innerHTML = `
       <header class="battle-heading">
-        <div class="battle-location"><span class="location-mark" aria-hidden="true">◇</span><div><p class="eyebrow">VALE DO SAL</p><p class="encounter-name">Emboscada na vereda</p></div></div>
+        <div class="battle-location"><span class="location-mark" aria-hidden="true">◇</span><div><p class="eyebrow">VALE DO SAL</p><p class="encounter-name" data-ui="encounter">Campo das Salinas</p></div></div>
         <div class="battle-balance" aria-label="Estado do combate">
-          <div class="balance-side balance-side--ally"><span class="count-dot"></span><strong data-ui="allies">3</strong><span>mercenários</span></div>
+          <div class="balance-side balance-side--ally"><span class="count-dot"></span><strong data-ui="allies">21</strong><span>aliados</span></div>
           <div class="round-label"><span>RODADA</span><strong data-ui="round">1</strong></div>
-          <div class="balance-side balance-side--enemy"><strong data-ui="enemies">4</strong><span>inimigos</span><span class="count-dot"></span></div>
+          <div class="balance-side balance-side--enemy"><strong data-ui="enemies">21</strong><span>inimigos</span><span class="count-dot"></span></div>
         </div>
         <nav class="battle-tools" aria-label="Opções do combate">
+          <button class="tool-button" data-action="speed" title="Velocidade das tropas — V"><span class="speed-symbol" aria-hidden="true">»</span><span class="tool-label" data-ui="speed-label">2×</span></button>
           <button class="tool-button" data-action="help" title="Como jogar" aria-label="Ajuda"><span class="tool-symbol" aria-hidden="true">?</span><span class="tool-label">Ajuda</span></button>
           <button class="tool-button" data-action="pause" title="Pausar ou retomar — Esc"><span class="pause-symbol" data-ui="pause-icon" aria-hidden="true">Ⅱ</span><span class="tool-label" data-ui="pause-label">Pausar</span></button>
           <button class="tool-button" data-action="restart" title="Reiniciar este combate"><span class="restart-symbol" aria-hidden="true">↻</span><span class="tool-label">Reiniciar</span></button>
         </nav>
       </header>
-      <div class="battle-objective"><span class="objective-mark" aria-hidden="true">✧</span> Derrote os inimigos e mantenha a companhia viva.</div>
+      <div class="battle-objective"><span class="objective-mark" aria-hidden="true">✧</span> <span data-ui="objective">Vença o bando inimigo. Você comanda o Líder Supremo; as tropas lutam sozinhas.</span></div>
       <section class="combat-log" aria-label="Últimos acontecimentos" aria-live="polite" aria-atomic="false">
         <p data-ui="log-0"></p><p data-ui="log-1"></p><p data-ui="log-2"></p>
       </section>
@@ -69,6 +91,7 @@ export class CombatUI {
         <div class="unit-card-content">
           <div class="unit-name-row"><div><p class="eyebrow" data-ui="active-caption">SEU TURNO</p><h1 data-ui="active-name">Iria</h1></div><span class="morale-chip" data-ui="morale" title="Moral"><span class="morale-mark" aria-hidden="true">◆</span><span data-ui="morale-label">Firme</span></span></div>
           <p class="weapon-name" data-ui="weapon">Escudo e lâmina</p>
+          <p class="unit-role" data-ui="role"></p>
           <div class="health-line">${icon('heart')}<span class="compact-meter"><span data-ui="hp-fill"></span></span><strong data-ui="hp-value">60 / 60</strong></div>
           <div class="armor-line"><span class="armor-stat" title="Armadura da cabeça">${icon('helmet')}<span data-ui="head-value">25 / 25</span></span><span class="armor-stat" title="Armadura do corpo">${icon('shield')}<span data-ui="body-value">50 / 50</span></span><span class="armor-caption">armadura</span></div>
           <div class="resource-line"><span class="resource-label">PA</span><span class="ap-pips" data-ui="ap-pips" aria-label="Pontos de ação"></span><strong data-ui="ap-value">9/9</strong><span class="resource-divider"></span>${icon('fatigue')}<strong data-ui="fatigue-value">0/80</strong></div>
@@ -93,24 +116,25 @@ export class CombatUI {
 
       <aside class="target-card hud-panel" aria-label="Unidade sob o cursor" data-ui="target-card" hidden>
         <div class="target-heading"><img data-ui="target-image" src="${assetUrl('raider')}" alt="" draggable="false"><div><p class="eyebrow" data-ui="target-team">INIMIGO</p><h2 data-ui="target-name">Saqueador</h2><p class="target-morale" data-ui="target-morale">Firme</p></div></div>
+        <p class="target-role" data-ui="target-role"></p>
         <div class="target-stats"><span title="Vida">${icon('heart')}<strong data-ui="target-hp"></strong></span><span title="Armadura da cabeça">${icon('helmet')}<strong data-ui="target-head"></strong></span><span title="Armadura do corpo">${icon('shield')}<strong data-ui="target-body"></strong></span></div>
         <div class="attack-preview" data-ui="preview" hidden><div class="preview-chance"><strong data-ui="preview-chance">75<span>%</span></strong><span>chance de acerto</span></div><p data-ui="preview-reason"></p><div class="preview-cost" data-ui="preview-cost"></div></div>
       </aside>
 
       <div class="modal-backdrop" data-ui="help-modal" hidden>
         <section class="battle-modal help-modal" role="dialog" aria-modal="true" aria-labelledby="help-title" tabindex="-1">
-          <p class="eyebrow">CADERNO DA COMPANHIA</p><h2 id="help-title">Cada passo tem seu preço.</h2>
-          <p class="modal-lead">Conduza três mercenários para fora da emboscada. A ordem dos turnos indica quem age a seguir.</p>
+          <p class="eyebrow">CADERNO DA FACÇÃO</p><h2 id="help-title">Quem comanda é o líder.</h2>
+          <p class="modal-lead">Você controla só os líderes, marcados com um estandarte. As tropas do pelotão agem sozinhas por enquanto; as ordens chegam na próxima etapa. A ordem dos turnos indica quem age a seguir.</p>
           <div class="help-controls"><div><kbd>1</kbd><span><strong>Mover</strong>Clique num hexágono alcançável. O caminho mostra o custo antes de confirmar.</span></div><div><kbd>2</kbd><span><strong>Atacar</strong>Clique num inimigo. Confira alcance, chance de acerto e custos.</span></div><div><kbd>W</kbd><span><strong>Aguardar</strong>Adie sua vez para o fim da fila, uma vez por rodada.</span></div><div><kbd>ESPAÇO</kbd><span><strong>Encerrar turno</strong>Finalize a ativação da unidade atual.</span></div></div>
-          <div class="help-notes"><p>${icon('fatigue')} Ações gastam PA e acumulam fadiga. Na primeira ativação de cada rodada, 15 de fadiga são removidos automaticamente.</p><p>${icon('sword')} Sair de um hexágono ameaçado pode provocar um ataque. Arcos não disparam quando o arqueiro está engajado.</p><p>${icon('shield')} Cabeça e corpo têm armaduras separadas. Obstáculos e combatentes bloqueiam a linha de tiro.</p><p><span class="help-morale" aria-hidden="true">◆</span> Perdas e ferimentos afetam a moral. Unidades em fuga procuram uma saída.</p></div>
+          <div class="help-notes"><p><span class="help-morale" aria-hidden="true">✥</span><span>Arraste o campo para mover a câmera, use a roda do mouse ou as setas para navegar e <kbd>C</kbd> para centralizar em quem está agindo. <kbd>V</kbd> muda a velocidade das tropas.</span></p><p>${icon('fatigue')} Ações gastam PA e acumulam fadiga. Na primeira ativação de cada rodada, 15 de fadiga são removidos automaticamente.</p><p>${icon('sword')} Sair de um hexágono ameaçado pode provocar um ataque. Arcos não disparam quando o arqueiro está engajado.</p><p>${icon('shield')} Cabeça e corpo têm armaduras separadas. Obstáculos e combatentes bloqueiam a linha de tiro.</p><p><span class="help-morale" aria-hidden="true">◆</span> Perdas e ferimentos afetam a moral. Unidades em fuga procuram uma saída.</p></div>
           <div class="modal-footer"><span><kbd>G</kbd> mostrar grade <span class="footer-separator">·</span> <kbd>ESC</kbd> pausar</span><button class="primary-button" data-action="close-help">Voltar ao combate <span aria-hidden="true">→</span></button></div>
         </section>
       </div>
       <div class="modal-backdrop pause-backdrop" data-ui="pause-modal" hidden>
-        <section class="battle-modal pause-modal" role="dialog" aria-modal="true" aria-labelledby="pause-title" tabindex="-1"><p class="eyebrow">UM INSTANTE DE SILÊNCIO</p><h2 id="pause-title">Combate pausado</h2><p class="modal-lead">A companhia aguarda suas ordens.</p><button class="primary-button" data-action="pause">Retomar combate <span aria-hidden="true">→</span></button><button class="text-button" data-action="help">Consultar os controles</button></section>
+        <section class="battle-modal pause-modal" role="dialog" aria-modal="true" aria-labelledby="pause-title" tabindex="-1"><p class="eyebrow">UM INSTANTE DE SILÊNCIO</p><h2 id="pause-title">Combate pausado</h2><p class="modal-lead">As tropas aguardam suas ordens.</p><button class="primary-button" data-action="pause">Retomar combate <span aria-hidden="true">→</span></button><button class="text-button" data-action="help">Consultar os controles</button></section>
       </div>
       <div class="modal-backdrop" data-ui="outcome-modal" hidden>
-        <section class="battle-modal outcome-modal" role="dialog" aria-modal="true" aria-labelledby="outcome-title" tabindex="-1"><div class="outcome-emblem" data-ui="outcome-emblem" aria-hidden="true">◇</div><p class="eyebrow" data-ui="outcome-label">VITÓRIA</p><h2 id="outcome-title" data-ui="outcome-title">A vereda é nossa.</h2><p class="modal-lead" data-ui="outcome-description"></p><dl class="outcome-stats"><div><dt>Sobreviventes</dt><dd data-ui="survivors">3</dd></div><div><dt>Caídos</dt><dd data-ui="fallen">0</dd></div><div><dt>Em retirada</dt><dd data-ui="escaped">0</dd></div></dl><button class="primary-button" data-action="restart">Jogar novamente <span aria-hidden="true">↻</span></button><p class="outcome-footnote">O próximo capítulo da companhia ainda será escrito.</p></section>
+        <section class="battle-modal outcome-modal" role="dialog" aria-modal="true" aria-labelledby="outcome-title" tabindex="-1"><div class="outcome-emblem" data-ui="outcome-emblem" aria-hidden="true">◇</div><p class="eyebrow" data-ui="outcome-label">VITÓRIA</p><h2 id="outcome-title" data-ui="outcome-title">O campo é nosso.</h2><p class="modal-lead" data-ui="outcome-description"></p><dl class="outcome-stats"><div><dt>Sobreviventes</dt><dd data-ui="survivors">3</dd></div><div><dt>Caídos</dt><dd data-ui="fallen">0</dd></div><div><dt>Em retirada</dt><dd data-ui="escaped">0</dd></div></dl><button class="primary-button" data-action="restart">Jogar novamente <span aria-hidden="true">↻</span></button><p class="outcome-footnote">O próximo capítulo da facção ainda será escrito.</p></section>
       </div>`;
     root.appendChild(this.element);
     this.element.querySelectorAll<HTMLElement>('[data-ui]').forEach(node => this.nodes.set(node.dataset.ui!, node));
@@ -124,6 +148,8 @@ export class CombatUI {
     this.text('allies', living('ally').length);
     this.text('enemies', living('enemy').length);
     this.text('round', state.round);
+    this.text('encounter', ENCOUNTER_NAMES[state.encounter]);
+    this.text('speed-label', `${view.speed}×`);
     this.text('pause-label', view.paused ? 'Retomar' : 'Pausar');
     this.text('pause-icon', view.paused ? '▷' : 'Ⅱ');
     this.element.classList.toggle('is-paused', view.paused);
@@ -134,9 +160,9 @@ export class CombatUI {
     for (let index = 0; index < 3; index++) this.text(`log-${index}`, recentLog[index] ?? '');
 
     this.node('active-card').hidden = !active;
-    if (active) this.updateActive(active, view);
+    if (active) this.updateActive(state, active, view);
     this.updateQueue(state);
-    const canAct = Boolean(active && active.team === 'ally' && !active.dead && !active.escaped && active.morale > 0 && !view.busy && !view.paused && !view.helpOpen && state.outcome === 'ongoing');
+    const canAct = Boolean(active && isPlayerControlled(active) && !view.busy && !view.paused && !view.helpOpen && state.outcome === 'ongoing');
     this.button('move').disabled = !canAct || (active?.ap ?? 0) < 2 || Boolean(active && active.fatigue + 4 > active.maxFatigue);
     this.button('attack').disabled = !canAct || Boolean(active && (active.ap < active.weapon.ap || active.fatigue + active.weapon.fatigue > active.maxFatigue || (active.weapon.kind === 'ranged' && active.weapon.ammo === 0)));
     this.button('wait').disabled = !canAct || Boolean(active?.waited);
@@ -144,13 +170,13 @@ export class CombatUI {
     this.button('pause').disabled = state.outcome !== 'ongoing';
     this.button('move').setAttribute('aria-pressed', String(view.mode === 'move'));
     this.button('attack').setAttribute('aria-pressed', String(view.mode === 'attack'));
-    this.text('intent', view.message || (view.busy ? 'O inimigo prepara sua próxima ação…' : view.mode === 'attack' ? 'Escolha um inimigo para atacar.' : 'Clique num hexágono alcançável para mover.'));
+    this.text('intent', view.message || (view.busy ? 'As tropas se movem…' : view.mode === 'attack' ? 'Escolha um inimigo para atacar.' : 'Clique num hexágono alcançável para mover.'));
     this.node('intent-dot').classList.toggle('is-enemy', active?.team === 'enemy');
 
     const hovered = state.units.find(unit => unit.id === view.hoveredId && !unit.dead && !unit.escaped);
     const showTarget = Boolean(hovered && hovered.id !== active?.id && state.outcome === 'ongoing');
     this.node('target-card').hidden = !showTarget;
-    if (hovered && showTarget) this.updateTarget(hovered, view);
+    if (hovered && showTarget) this.updateTarget(state, hovered, view);
 
     const help = this.node('help-modal');
     const outcome = this.node('outcome-modal');
@@ -178,11 +204,13 @@ export class CombatUI {
     this.element.remove();
   }
 
-  private updateActive(unit: BattleUnit, view: UIView): void {
+  private updateActive(state: BattleState, unit: BattleUnit, view: UIView): void {
     this.image('active-image', unit.asset);
     this.text('active-name', unit.name);
-    this.text('active-caption', unit.team === 'enemy' ? 'TURNO INIMIGO' : unit.morale === 0 ? 'EM RETIRADA' : view.busy ? 'EM AÇÃO' : 'SEU TURNO');
+    this.text('active-caption', unit.team === 'enemy' ? 'TURNO INIMIGO' : unit.morale === 0 ? 'EM RETIRADA'
+      : !isPlayerControlled(unit) ? 'TROPA ALIADA' : view.busy ? 'EM AÇÃO' : 'SEU TURNO');
     this.text('weapon', unit.weapon.name);
+    this.text('role', roleLine(state, unit));
     this.text('morale-label', MORALE[unit.morale]);
     this.node('morale').dataset.morale = String(unit.morale);
     this.node('morale').title = `Moral: ${MORALE[unit.morale]}`;
@@ -206,8 +234,9 @@ export class CombatUI {
   }
 
   private updateQueue(state: BattleState): void {
-    const units = state.queue.map(id => state.units.find(unit => unit.id === id)).filter((unit): unit is BattleUnit => Boolean(unit && !unit.dead && !unit.escaped));
-    const order = units.map(unit => unit.id).join('|');
+    const queued = state.queue.map(id => state.units.find(unit => unit.id === id)).filter((unit): unit is BattleUnit => Boolean(unit && !unit.dead && !unit.escaped));
+    const units = queued.slice(0, QUEUE_LIMIT), hidden = queued.length - units.length;
+    const order = `${units.map(unit => unit.id).join('|')}+${hidden}`;
     const list = this.node('queue');
     for (let index = 0; index < units.length; index++) {
       const unit = units[index];
@@ -221,6 +250,7 @@ export class CombatUI {
       }
       token.dataset.team = unit.team;
       token.classList.toggle('is-current', index === 0);
+      token.classList.toggle('is-leader', unit.role === 'leader');
       token.classList.toggle('is-fleeing', unit.morale === 0);
       token.setAttribute('aria-current', index === 0 ? 'step' : 'false');
       token.title = `${unit.name} · ${unit.team === 'ally' ? 'Aliado' : 'Inimigo'} · ${unit.hp}/${unit.maxHp} vida · ${MORALE[unit.morale]}`;
@@ -231,14 +261,17 @@ export class CombatUI {
       token.querySelector<HTMLElement>('.turn-health i')!.style.width = `${clamp(unit.hp / Math.max(1, unit.maxHp) * 100, 0, 100)}%`;
     }
     if (order !== this.queueOrder) {
-      list.replaceChildren(...units.map(unit => this.queueNodes.get(unit.id)!));
+      this.moreToken.textContent = `+${hidden}`;
+      this.moreToken.title = `Mais ${hidden} ${hidden === 1 ? 'combatente' : 'combatentes'} nesta rodada`;
+      list.replaceChildren(...units.map(unit => this.queueNodes.get(unit.id)!), ...(hidden ? [this.moreToken] : []));
       this.queueOrder = order;
     }
   }
 
-  private updateTarget(unit: BattleUnit, view: UIView): void {
+  private updateTarget(state: BattleState, unit: BattleUnit, view: UIView): void {
     this.image('target-image', unit.asset);
     this.text('target-name', unit.name);
+    this.text('target-role', roleLine(state, unit));
     this.text('target-team', unit.team === 'enemy' ? 'INIMIGO' : 'ALIADO');
     this.text('target-morale', MORALE[unit.morale]);
     this.text('target-hp', `${unit.hp}/${unit.maxHp}`);
@@ -258,8 +291,8 @@ export class CombatUI {
     const victory = state.outcome === 'victory';
     const allies = state.units.filter(unit => unit.team === 'ally');
     this.text('outcome-label', victory ? 'VITÓRIA' : 'DERROTA');
-    this.text('outcome-title', victory ? 'A vereda é nossa.' : 'O vale cobra seu preço.');
-    this.text('outcome-description', victory ? 'Os inimigos deixaram o campo. A companhia venceu a emboscada.' : 'Todos os mercenários caíram ou deixaram o campo. A vereda pertence aos inimigos.');
+    this.text('outcome-title', victory ? 'O campo é nosso.' : 'O vale cobra seu preço.');
+    this.text('outcome-description', victory ? 'O bando inimigo caiu ou fugiu. A facção conquistou o campo.' : 'Nossas tropas caíram ou deixaram o campo. O vale pertence ao inimigo, por ora.');
     this.text('survivors', allies.filter(unit => !unit.dead && !unit.escaped).length);
     this.text('fallen', allies.filter(unit => unit.dead).length);
     this.text('escaped', allies.filter(unit => unit.escaped).length);
@@ -296,6 +329,7 @@ export class CombatUI {
       case 'end': this.callbacks.onEnd(); break;
       case 'restart': this.callbacks.onRestart(); break;
       case 'pause': this.callbacks.onPause(); break;
+      case 'speed': this.callbacks.onSpeed(); break;
       case 'help': this.callbacks.onHelp(); break;
       case 'close-help': this.callbacks.onCloseHelp(); break;
     }

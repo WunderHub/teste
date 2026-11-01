@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-  attack, BOARD_HEIGHT, BOARD_WIDTH, createBattle, distance, endTurn, getActive,
-  key, move, neighbors, performAiAction, previewAttack, reachable, waitTurn,
+  attack, attributeScore, distance, divisionOf, endTurn, getActive, isPlayerControlled,
+  key, makeLeader, makeTiles, makeUnit, move, neighbors, performAiAction, platoonTroops, previewAttack, reachable,
+  startBattle, tileAt, waitTurn,
   type BattleState, type Unit,
 } from './game';
+import { BOARD_HEIGHT, BOARD_WIDTH, createBattle, FIELD_HEIGHT, FIELD_WIDTH } from './encounters';
 
 /** A clear arena isolates rule interactions from the encounter's level design. */
 function duel(seed = 1, archer = false) {
@@ -280,4 +282,107 @@ describe('morale and encounter outcomes', () => {
     };
     expect(run()).toEqual(run());
   });
+});
+
+describe('leaders, platoons and the field battle', () => {
+  const sword = { name: 'Espada', kind: 'melee' as const, minDamage: 30, maxDamage: 40, armorDamage: 1, penetration: 0.3, ap: 4, fatigue: 12, range: 1, accuracy: 0 };
+  const base = { hp: 60, maxFatigue: 90, resolve: 50, initiative: 100, meleeSkill: 60, rangedSkill: 40, meleeDefense: 10, rangedDefense: 5, headArmor: 50, bodyArmor: 80 };
+
+  it('the field battle fields one leader and twenty troops per side on a valid board', () => {
+    const state = createBattle(1, 'campo-aberto');
+    expect([state.width, state.height]).toEqual([FIELD_WIDTH, FIELD_HEIGHT]);
+    expect(state.tiles).toHaveLength(FIELD_WIDTH * FIELD_HEIGHT);
+    for (const team of ['ally', 'enemy'] as const) {
+      const leaders = state.units.filter(u => u.team === team && u.role === 'leader');
+      const platoon = state.platoons.find(p => p.team === team)!;
+      expect(leaders).toHaveLength(1);
+      expect(platoon.leaderId).toBe(leaders[0].id);
+      expect(leaders[0].platoonId).toBe(platoon.id);
+      const troops = platoonTroops(state, platoon.id);
+      expect(troops).toHaveLength(20);
+      expect(troops.filter(u => divisionOf(u) === 'arqueiros')).toHaveLength(6);
+      expect(state.units.filter(u => u.team === team && u.role === 'troop').every(u => u.platoonId === platoon.id)).toBe(true);
+    }
+    expect(state.units.filter(u => u.supreme).map(u => u.id)).toEqual(['lider-supremo']);
+    expect(new Set(state.units.map(u => key(u.pos))).size).toBe(state.units.length);
+    for (const unit of state.units) {
+      expect(tileAt(state, unit.pos)).toBeDefined();
+      expect(tileAt(state, unit.pos)?.obstacle).toBeUndefined();
+    }
+  });
+
+  it('the player commands only their own leaders, and only while those leaders hold', () => {
+    const state = createBattle(1, 'campo-aberto');
+    expect(state.units.filter(isPlayerControlled).map(u => u.id)).toEqual(['lider-supremo']);
+    const leader = state.units.find(u => u.id === 'lider-supremo')!;
+    leader.morale = 0;
+    expect(isPlayerControlled(leader)).toBe(false);
+    leader.morale = 3; leader.dead = true;
+    expect(isPlayerControlled(leader)).toBe(false);
+  });
+
+  it('the attribute score sums the eight base attributes and ignores wounds and armor', () => {
+    const unit = makeUnit('t', 'Tropa', 'ally', 'iria', { q: 0, r: 0 }, sword, base);
+    expect(attributeScore(unit)).toBe(60 + 90 + 50 + 100 + 60 + 40 + 10 + 5);
+    unit.hp = 12; unit.headArmor = 0;
+    expect(attributeScore(unit)).toBe(415);
+  });
+
+  it('the leader subclass scales the base attributes but not armor', () => {
+    const combat = makeLeader('c', 'C', 'ally', 'captain', { q: 0, r: 0 }, sword, 'combate', base);
+    const strategist = makeLeader('e', 'E', 'ally', 'captain', { q: 0, r: 0 }, sword, 'estrategico', base);
+    const encourager = makeLeader('n', 'N', 'ally', 'captain', { q: 0, r: 0 }, sword, 'encorajador', base);
+    expect([combat.maxHp, combat.hp, combat.meleeSkill, combat.initiative]).toEqual([72, 72, 72, 120]);
+    expect([strategist.maxHp, strategist.meleeSkill, strategist.meleeDefense]).toEqual([51, 51, 9]);
+    expect(attributeScore(encourager)).toBe(415);
+    expect([combat.maxHeadArmor, combat.maxBodyArmor]).toEqual([50, 80]);
+    expect([combat.role, combat.leaderClass]).toEqual(['leader', 'combate']);
+  });
+
+  it('tiles are looked up by row and column, and a setup must list them row by row', () => {
+    const state = createBattle(1, 'campo-aberto');
+    expect(tileAt(state, { q: 29, r: 19 })).toMatchObject({ q: 29, r: 19 });
+    expect(tileAt(state, { q: 30, r: 0 })).toBeUndefined();
+    expect(tileAt(state, { q: -1, r: 3 })).toBeUndefined();
+    const tiles = makeTiles(3, 2).reverse();
+    expect(() => startBattle(1, { encounter: 'campo-aberto', width: 3, height: 2, tiles, units: [] })).toThrow();
+  });
+
+  it('a platoon whose leader falls is left without a leader and the player loses direct control', () => {
+    const state = createBattle(1, 'campo-aberto');
+    const leader = state.units.find(u => u.id === 'lider-supremo')!;
+    const killer = state.units.find(u => u.id === 'inimigo-1')!;
+    killer.pos = neighbors(leader.pos).find(h => !state.units.some(u => key(u.pos) === key(h)))!;
+    leader.hp = 1; leader.headArmor = leader.bodyArmor = 0; killer.meleeSkill = 1000;
+    setActive(state, killer);
+    expect(attack(state, leader.id).ok).toBe(true);
+    expect(leader.dead).toBe(true);
+    expect(state.platoons.find(p => p.team === 'ally')!.leaderId).toBeNull();
+    expect(state.log).toContain('O pelotão do Líder Supremo ficou sem líder.');
+    expect(state.units.some(isPlayerControlled)).toBe(false);
+  });
+
+  it('fleeing uses the edges of the current board, not the ambush size', () => {
+    const state = createBattle(1, 'campo-aberto');
+    const runner = state.units.find(u => u.id === 'inimigo-arco-1')!;
+    runner.pos = { q: FIELD_WIDTH - 1, r: 10 }; runner.morale = 0;
+    setActive(state, runner);
+    expect(performAiAction(state).ok).toBe(true);
+    expect(runner.escaped).toBe(true);
+  });
+
+  it.each([3, 731])('AI completes the field battle for seed %i without stalled turns', seed => {
+    const run = () => {
+      const state = createBattle(seed, 'campo-aberto');
+      let actions = 0;
+      while (state.outcome === 'ongoing' && actions < 3000) {
+        expect(performAiAction(state).ok).toBe(true);
+        actions++;
+      }
+      expect(state.outcome).not.toBe('ongoing');
+      expect(actions).toBeLessThan(3000);
+      return state;
+    };
+    expect(run()).toEqual(run());
+  }, 20000);
 });

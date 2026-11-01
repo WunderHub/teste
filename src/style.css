@@ -87,6 +87,7 @@ canvas { display: block; }
 .tool-symbol { display: inline-grid; place-items: center; width: 14px; height: 14px; border: 1px solid currentColor; border-radius: 50%; font-size: 11px; }
 .pause-symbol { font-size: 17px; line-height: 12px; }
 .restart-symbol { font-family: sans-serif; font-size: 20px; line-height: 12px; }
+.speed-symbol { font-size: 18px; line-height: 12px; }
 .battle-objective { position: absolute; top: 81px; left: 50%; transform: translateX(-50%); color: #d1d4bf; font-size: 12px; letter-spacing: .04em; white-space: nowrap; text-shadow: 0 1px 5px #0a1812; }
 .objective-mark { color: var(--copper); margin-right: 4px; font-size: 16px; }
 .combat-log { position: absolute; top: 95px; left: 27px; width: 280px; font-size: 12px; line-height: 1.65; letter-spacing: .02em; color: #d0d2be; text-shadow: 0 1px 4px #0b1713, 0 0 10px #0c1813; }
@@ -111,6 +112,7 @@ canvas { display: block; }
 .morale-chip[data-morale='2'] { color: var(--copper); }
 .morale-chip[data-morale='4'] { color: #b5c8a6; }
 .weapon-name { margin-top: 3px !important; font-size: 12px; color: #9fa993; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.unit-role { margin-top: 2px !important; font-size: 11px; color: var(--copper); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .health-line { display: flex; align-items: center; gap: 6px; margin-top: 11px; }
 .health-line .ui-icon { width: 15px; height: 15px; opacity: .85; }
 .health-line strong { font-size: 12px; font-weight: 500; letter-spacing: .03em; min-width: 43px; text-align: right; }
@@ -154,6 +156,8 @@ canvas { display: block; }
 .turn-token.is-current img { width: 57px; height: 66px; top: -1px; }
 .turn-token.is-current .turn-name { color: var(--bone); font-size: 9px; }
 .turn-token.is-fleeing { opacity: .5; }
+.turn-token.is-leader { border-top: 2px solid var(--copper); }
+.turn-more { align-self: center; min-width: 34px; height: 30px; padding: 0 6px; display: grid; place-items: center; color: #c2c6ad; font-size: 12px; background: #17231d99; border: 1px solid #9da48b30; }
 
 .action-dock { position: absolute; bottom: 24px; left: 50%; transform: translateX(-29%); width: 568px; pointer-events: auto; border-top-color: #a1a58666; }
 .action-intent { height: 31px; display: flex; align-items: center; gap: 7px; padding: 0 11px; border-bottom: 1px solid #9aa18329; color: #c3cab4; font-size: 12px; line-height: 1.1; }
@@ -182,6 +186,7 @@ kbd { font: 9px var(--sans); border: 1px solid #9aa48b42; min-width: 15px; heigh
 .target-card[data-team='ally'] .eyebrow { color: var(--teal); }
 .target-heading h2 { font-family: var(--serif); font-size: 24px; font-weight: 600; line-height: 1; margin-top: 2px; }
 .target-morale { color: #a9b69d; font-size: 11px; margin-top: 4px !important; }
+.target-role { margin-top: 8px !important; font-size: 11px; color: var(--copper); }
 .target-stats { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; gap: 7px; }
 .target-stats > span { display: inline-flex; align-items: center; gap: 4px; }
 .target-stats .ui-icon { width: 15px; height: 15px; opacity: .65; }
