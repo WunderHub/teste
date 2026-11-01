@@ -1,9 +1,11 @@
 import Phaser from 'phaser';
 import {
-  getActive, key, distance, reachable, moveAp, previewAttack, move, attack, waitTurn, endTurn, performAiAction,
-  isPlayerControlled, tileAt, type BattleState, type Unit, type Hex, type ActionResult, type BattleEvent,
+  getActive, key, distance, neighbors, reachable, moveAp, previewAttack, move, attack, waitTurn, endTurn,
+  isPlayerControlled, tileAt, checkOrder, issueOrder, commandedPlatoons, commanderOf, platoonOf, platoonTroops, divisionOf, orderInfo, ORDERS,
+  type BattleState, type Unit, type Hex, type ActionResult, type BattleEvent, type OrderId, type OrderTarget,
 } from './game';
 import { createBattle } from './encounters';
+import { performAiAction } from './ai';
 import { CombatUI, type UIView } from './ui';
 
 /** The HUD was laid out for a 1440×900 screen; that size still sets the default zoom. */
@@ -18,10 +20,14 @@ const AI_DELAY = 280;
 const DRAG_THRESHOLD = 6;
 const SPEEDS = [1, 2, 4] as const;
 const COLORS = { ally: 0x7caba1, enemy: 0xcb766a, gold: 0xc49a66, bone: 0xe5dec9 };
+const ORDER_TARGETS: OrderTarget[] = ['todos', 'guerreiros', 'arqueiros'];
+const TEXT_FONT = '"Barlow Condensed", "Arial Narrow", Arial, sans-serif';
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 type Pawn = {
   image: Phaser.GameObjects.Image; base: Phaser.GameObjects.Graphics; flag: Phaser.GameObjects.Graphics;
   label: Phaser.GameObjects.Text; bar: Phaser.GameObjects.Graphics;
+  /** The letter of the order a troop follows. */
+  mark: Phaser.GameObjects.Text;
 };
 type Drag = { x: number; y: number; scrollX: number; scrollY: number; moved: boolean };
 
@@ -47,7 +53,7 @@ const worldSize = (s: BattleState) => ({ width: 2 * MARGIN_X + (s.width - 0.5) *
 export class CombatScene extends Phaser.Scene {
   state!: BattleState;
   ui!: CombatUI;
-  view: UIView = { mode: 'move', paused: false, helpOpen: false, busy: false, speed: 2, message: 'Clique num hexágono para mover. Clique num inimigo para atacar.' };
+  view: UIView = { mode: 'move', paused: false, helpOpen: false, busy: false, speed: 2, orderTarget: 'todos', message: 'Clique num hexágono para mover. Clique num inimigo para atacar.' };
   private world = { width: W, height: H };
   private pawns = new Map<string, Pawn>();
   private grid!: Phaser.GameObjects.Graphics;
@@ -92,6 +98,9 @@ export class CombatScene extends Phaser.Scene {
       onSpeed: () => this.cycleSpeed(),
       onHelp: () => { this.view.helpOpen = true; this.refresh(); },
       onCloseHelp: () => { this.view.helpOpen = false; this.refresh(); this.scheduleAi(); },
+      onOrder: id => this.giveOrder(id),
+      onOrderTarget: target => this.setOrderTarget(target),
+      onOrderHover: id => { this.view.orderHover = id; this.drawGrid(); this.ui.update(this.state, this.view); },
     });
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => this.pointerDown(pointer));
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => this.pointerMove(pointer));
@@ -225,13 +234,20 @@ export class CombatScene extends Phaser.Scene {
     for (const unit of this.state.units) {
       let pawn = this.pawns.get(unit.id); const p = hexToWorld(unit.pos);
       if (!pawn) {
-        pawn = { image: this.add.image(p.x, p.y + 7, unit.asset).setOrigin(0.5, 0.94).setDisplaySize(82, 100), base: this.add.graphics(), flag: this.add.graphics(), label: this.add.text(p.x, p.y + 23, '', { fontFamily: 'Arial', fontSize: '12px', color: '#e5dec9', stroke: '#20271e', strokeThickness: 4 }).setOrigin(0.5, 0), bar: this.add.graphics() };
+        pawn = { image: this.add.image(p.x, p.y + 7, unit.asset).setOrigin(0.5, 0.94).setDisplaySize(82, 100), base: this.add.graphics(), flag: this.add.graphics(), label: this.add.text(p.x, p.y + 23, '', { fontFamily: 'Arial', fontSize: '12px', color: '#e5dec9', stroke: '#20271e', strokeThickness: 4 }).setOrigin(0.5, 0), bar: this.add.graphics(),
+          mark: this.add.text(0, 0, '', { fontFamily: 'Arial', fontSize: '11px', fontStyle: 'bold', color: '#e2c99f', backgroundColor: '#18211ee6', padding: { x: 4, y: 1 } }).setOrigin(0.5).setVisible(false) };
         this.pawns.set(unit.id, pawn);
       }
-      pawn.base.clear(); pawn.bar.clear(); pawn.flag.clear();
+      pawn.base.clear(); pawn.bar.clear(); pawn.flag.clear(); pawn.mark.setVisible(false);
       if (unit.escaped) { pawn.image.setVisible(false); pawn.label.setVisible(false); continue; }
       pawn.image.setVisible(true).setPosition(p.x, p.y + 7).setDepth(100 + p.y);
       if (unit.dead) { pawn.image.setTexture('death').setDisplaySize(62, 76).setAlpha(0.65).setDepth(5); pawn.label.setVisible(false); continue; }
+      if (unit.order && unit.morale > 0) {
+        // A stale order (no word from the leader) keeps the letter, faded and without the bonus.
+        // Worn on the shoulder, just above the own sprite: the rows in front never cover that spot.
+        pawn.mark.setText(orderInfo(unit.order.id).mark).setPosition(p.x - 23, p.y - 40).setDepth(101 + p.y).setVisible(true)
+          .setAlpha(unit.order.stale ? 0.5 : 1).setColor(unit.team === 'ally' ? '#e2c99f' : '#e8a596');
+      }
       pawn.image.setTexture(unit.asset).setDisplaySize(82, 100).setAlpha(unit.morale === 0 ? 0.68 : 1);
       const selected = unit.id === active?.id, hovered = unit.id === this.view.hoveredId, leader = unit.role === 'leader';
       const color = selected ? COLORS.gold : COLORS[unit.team];
@@ -255,10 +271,11 @@ export class CombatScene extends Phaser.Scene {
       this.lastActive = active?.id ?? '';
       const hasShot = active?.weapon.kind === 'ranged' && this.state.units.some(u => u.team !== active.team && previewAttack(this.state, active, u).allowed);
       this.view.mode = hasShot ? 'attack' : 'move';
-      this.hoverHex = undefined; this.view.hoveredId = undefined; this.view.preview = undefined;
+      this.hoverHex = undefined; this.view.hoveredId = undefined; this.view.preview = undefined; this.view.orderHover = undefined;
       if (active) this.view.message = active.morale === 0 ? `${active.name} está em fuga.`
-        : isPlayerControlled(active) ? `Sua vez · ${active.name}. Mova-se ou escolha um alvo.`
-        : active.team === 'ally' ? `${active.name} luta por conta própria…` : `${active.name} está agindo…`;
+        : isPlayerControlled(active) ? `Sua vez · ${active.name}. Dê uma ordem, mova-se ou escolha um alvo.`
+        : active.team === 'ally' ? `${active.name} ${active.order ? `cumpre: ${orderInfo(active.order.id).label}`
+          : commanderOf(this.state, platoonOf(this.state, active)) ? 'segura a posição…' : 'age por conta própria…'}` : `${active.name} está agindo…`;
       if (active && isPlayerControlled(active) && !this.onScreen(active.pos, -160)) this.focusOn(active, true);
     }
     this.pathMap = active && this.playerCanAct() ? reachable(this.state, active) : new Map();
@@ -271,6 +288,7 @@ export class CombatScene extends Phaser.Scene {
     if (!active || this.state.outcome !== 'ongoing' || this.view.paused || this.view.helpOpen) return;
     if (this.playerCanAct() && this.view.mode === 'move') for (const tile of this.state.tiles) if (this.pathMap.has(key(tile))) this.hex(this.grid, tile, COLORS.ally, 0.055, 0.24);
     this.hex(this.grid, active.pos, COLORS.gold, 0.08, 0.75, 2);
+    if (isPlayerControlled(active) && commandedPlatoons(this.state, active).length) this.drawCommand(active);
     if (this.playerCanAct() && this.view.mode === 'attack') for (const enemy of this.state.units.filter(u => u.team !== active.team && !u.dead && !u.escaped)) {
       if (previewAttack(this.state, active, enemy).allowed) this.hex(this.grid, enemy.pos, COLORS.enemy, 0.13, 0.7, 2);
     }
@@ -280,6 +298,39 @@ export class CombatScene extends Phaser.Scene {
       for (const step of path) { const p = hexToWorld(step); this.pathGraphics.lineBetween(previous.x, previous.y, p.x, p.y); this.pathGraphics.fillStyle(COLORS.gold, 1).fillCircle(p.x, p.y, 3); previous = p; }
       this.hex(this.pathGraphics, this.hoverHex!, COLORS.gold, 0.12, 0.9, 2);
     }
+  }
+  /** The command range outline and, while an order is under the cursor, who would hear it and who is too far. */
+  private drawCommand(leader: Unit) {
+    const range = leader.commandRange;
+    this.grid.lineStyle(1.5, COLORS.gold, 0.5);
+    for (const tile of this.state.tiles) {
+      if (distance(tile, leader.pos) > range) continue;
+      const p = hexToWorld(tile);
+      for (const next of neighbors(tile)) {
+        if (distance(next, leader.pos) <= range) continue;
+        // The shared edge sits across the line between the two centers, 30° to each side.
+        const n = hexToWorld(next), angle = Math.atan2(n.y - p.y, n.x - p.x), r = R - 1;
+        this.grid.lineBetween(p.x + r * Math.cos(angle - Math.PI / 6), p.y + r * Math.sin(angle - Math.PI / 6),
+          p.x + r * Math.cos(angle + Math.PI / 6), p.y + r * Math.sin(angle + Math.PI / 6));
+      }
+    }
+    if (!this.view.orderHover || !this.playerCanAct()) return;
+    const check = checkOrder(this.state, leader, this.view.orderHover, this.view.orderTarget);
+    const divisions = check.target === 'todos' ? ['guerreiros', 'arqueiros'] : [check.target];
+    for (const troop of check.troops) this.hex(this.grid, troop.pos, COLORS.gold, check.allowed ? 0.16 : 0.06, check.allowed ? 0.85 : 0.35, 2);
+    for (const platoon of commandedPlatoons(this.state, leader)) for (const troop of platoonTroops(this.state, platoon.id)) {
+      if (divisions.includes(divisionOf(troop)) && distance(troop.pos, leader.pos) > range) this.hex(this.grid, troop.pos, COLORS.enemy, 0.05, 0.45, 1.5);
+    }
+  }
+  private giveOrder(id: OrderId) {
+    if (!this.playerCanAct()) return;
+    void this.execute(() => issueOrder(this.state, id, this.view.orderTarget));
+  }
+  private setOrderTarget(target: OrderTarget) {
+    if (!this.playerCanAct()) return;
+    this.view.orderTarget = target;
+    this.view.message = `As próximas ordens vão para ${target === 'todos' ? 'todo o pelotão' : `os ${target}`}.`;
+    this.drawGrid(); this.ui.update(this.state, this.view);
   }
   private playerCanAct() {
     const active = getActive(this.state);
@@ -352,8 +403,10 @@ export class CombatScene extends Phaser.Scene {
     if (hit.unit && hit.unit.team !== active.team) void this.execute(() => attack(this.state, hit.unit!.id));
     else if (hit.hex && !hit.unit && this.view.mode === 'move') void this.execute(() => move(this.state, hit.hex!));
     else if (hit.unit && hit.unit.id !== active.id) {
+      const commander = commanderOf(this.state, platoonOf(this.state, hit.unit));
       this.view.message = hit.unit.role === 'troop' && hit.unit.team === 'ally'
-        ? `${hit.unit.name} é uma tropa: ela age sozinha, sem comando direto.` : `${hit.unit.name} aguardará sua vez na ordem dos turnos.`;
+        ? `${hit.unit.name} é uma tropa: ${commander ? `cumpre as ordens de ${commander.name}. Use a aba de comando.` : 'luta por conta própria.'}`
+        : `${hit.unit.name} aguardará sua vez na ordem dos turnos.`;
       this.ui.update(this.state, this.view);
     }
   }
@@ -374,6 +427,9 @@ export class CombatScene extends Phaser.Scene {
     if (event.code === 'Digit1') { this.view.mode = 'move'; this.refresh(); }
     if (event.code === 'Digit2') { this.view.mode = 'attack'; this.refresh(); }
     if (event.code === 'KeyW') { event.preventDefault(); void this.execute(() => waitTurn(this.state)); }
+    const digit = /^(?:Digit|Numpad)([3-9])$/.exec(event.code);
+    if (digit) { event.preventDefault(); this.giveOrder(ORDERS[Number(digit[1]) - 3].id); }
+    if (event.code === 'KeyT') { event.preventDefault(); this.setOrderTarget(ORDER_TARGETS[(ORDER_TARGETS.indexOf(this.view.orderTarget) + 1) % ORDER_TARGETS.length]); }
     if (event.code === 'Space' && target.tagName !== 'BUTTON') { event.preventDefault(); void this.execute(() => endTurn(this.state)); }
   }
   private cycleSpeed() {
@@ -397,7 +453,8 @@ export class CombatScene extends Phaser.Scene {
     this.transient.clear();
     for (const pawn of this.pawns.values()) pawn.image.clearTint();
     this.state = createBattle(SEED, 'campo-aberto'); this.lastActive = ''; this.lastActor = '';
-    this.view = { mode: 'move', paused: false, helpOpen: false, busy: false, speed: this.view.speed, message: 'Uma nova tentativa. Conduza o Líder Supremo à vitória.' };
+    this.view = { mode: 'move', paused: false, helpOpen: false, busy: false, speed: this.view.speed, orderTarget: this.view.orderTarget,
+      message: `Uma nova tentativa. Conduza ${this.playerLeader()?.name ?? 'o pelotão'} à vitória.` };
     this.pointerTip.setVisible(false); this.focusOn(this.playerLeader()); this.refresh(); this.scheduleAi();
   }
   private async execute(action: () => ActionResult) {
@@ -413,6 +470,12 @@ export class CombatScene extends Phaser.Scene {
   }
   private async animateEvent(event: BattleEvent) {
     const pawn = event.unitId ? this.pawns.get(event.unitId) : undefined;
+    if (event.type === 'order' && pawn && event.order) {
+      const leader = this.state.units.find(u => u.id === event.unitId)!;
+      if (!this.onScreen(leader.pos, 120)) return;
+      await this.shout(leader, orderInfo(event.order).label);
+      return;
+    }
     if (event.type === 'move' && pawn && event.to) {
       const p = hexToWorld(event.to); pawn.base.clear(); pawn.bar.clear(); pawn.flag.clear(); pawn.label.setVisible(false);
       // Off-camera movement resolves instantly so a 40-unit round does not crawl.
@@ -434,6 +497,19 @@ export class CombatScene extends Phaser.Scene {
       this.transient.add(text);
       this.tweens.add({ targets: text, y: b.y - 137, alpha: 0, duration: 1050, delay: 170, onComplete: () => { text.destroy(); this.transient.delete(text); } });
     }
+  }
+  /** A leader calls an order: the words rise over the leader and a ring sweeps out to the command range. */
+  private shout(leader: Unit, words: string) {
+    const p = hexToWorld(leader.pos), color = leader.team === 'ally' ? '#e2c99f' : '#efb3a3';
+    const ring = this.add.graphics().setDepth(3), sweep = { radius: 30, alpha: 0.7 };
+    const text = this.add.text(p.x, p.y - 138, words, { fontFamily: TEXT_FONT, fontSize: '24px', fontStyle: 'bold', color, stroke: '#151b19', strokeThickness: 5 }).setOrigin(0.5).setDepth(1600);
+    this.transient.add(ring); this.transient.add(text);
+    const radius = Math.max(60, leader.commandRange * DX);
+    this.tweens.add({ targets: sweep, radius, alpha: 0, duration: 650, ease: 'Sine.easeOut',
+      onUpdate: () => ring.clear().lineStyle(3, COLORS.gold, sweep.alpha).strokeCircle(p.x, p.y, sweep.radius),
+      onComplete: () => { ring.destroy(); this.transient.delete(ring); } });
+    this.tweens.add({ targets: text, y: p.y - 162, alpha: 0, duration: 900, delay: 1300, onComplete: () => { text.destroy(); this.transient.delete(text); } });
+    return new Promise<void>(resolve => this.time.delayedCall(420, resolve));
   }
   /** Runs the next AI step. Units the player cannot command (troops, enemies, fleeing leaders) all go through here. */
   private scheduleAi() {
