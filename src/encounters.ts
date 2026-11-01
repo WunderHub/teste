@@ -23,6 +23,9 @@ const bow: Weapon = { name: 'Arco de freixo', kind: 'ranged', minDamage: 35, max
   armorDamage: 0.65, penetration: 0.35, ap: 4, fatigue: 15, range: 6, accuracy: 0 };
 const cleaver: Weapon = { name: 'Lâmina lascada', kind: 'melee', minDamage: 28, maxDamage: 40,
   armorDamage: 0.85, penetration: 0.25, ap: 4, fatigue: 12, range: 1, accuracy: 0 };
+/** The field battle's raiders carry a heavier blade than the ambush ones, so both armies hit about as hard. */
+const raidBlade: Weapon = { name: 'Cutelo de saque', kind: 'melee', minDamage: 32, maxDamage: 46,
+  armorDamage: 0.95, penetration: 0.35, ap: 4, fatigue: 12, range: 1, accuracy: 0 };
 const longsword: Weapon = { name: 'Espada da fundação', kind: 'melee', minDamage: 35, maxDamage: 50,
   armorDamage: 0.9, penetration: 0.3, ap: 4, fatigue: 12, range: 1, accuracy: 5 };
 const warAxe: Weapon = { name: 'Machado de guerra', kind: 'melee', minDamage: 32, maxDamage: 52,
@@ -68,15 +71,19 @@ const ALLY_NAMES = ['Bento', 'Clara', 'Davi', 'Elisa', 'Fausto', 'Gaspar', 'Hild
 /**
  * 1 leader and 20 troops per side (14 warriors and 6 archers), the ideal ratio from docs/design-combate.md.
  * The armies are fixed: a private generator varies stats, so every restart fields the same people.
+ * The faction sends Duarte, a regular leader: the Líder Supremo stays out of battle unless nothing else is left.
  */
+/** Mirror image across the board's vertical center line. Odd rows sit half a hex to the right, so they shift one less. */
+const mirror = ({ q, r }: Hex): Hex => ({ q: FIELD_WIDTH - 1 - q - (r & 1), r });
+
 function openField(): BattleSetup {
-  const tiles = makeTiles(FIELD_WIDTH, FIELD_HEIGHT, (q, r) =>
-    (q >= 13 && q <= 16 && r >= 8 && r <= 11) || (r >= 18 && q >= 10 && q <= 19) ? 'rough' : 'grass');
-  // Each side's half mirrors the other, so neither army starts with better cover.
+  // Each side's half mirrors the other, so neither army starts with better cover or a shorter march.
+  const roughLeft = ({ q, r }: Hex) => (q >= 13 && q <= 14 && r >= 8 && r <= 11) || (r >= 18 && q >= 10 && q <= 14);
+  const tiles = makeTiles(FIELD_WIDTH, FIELD_HEIGHT, (q, r) => roughLeft({ q, r }) || roughLeft(mirror({ q, r })) ? 'rough' : 'grass');
   const half: [number, number, Tile['obstacle']][] = [
     [3, 2, 'deadtree'], [2, 17, 'rocks'], [11, 9, 'rocks'], [12, 16, 'ruin'], [13, 3, 'rocks'], [14, 13, 'deadtree'],
   ];
-  placeObstacles(tiles, FIELD_WIDTH, [...half, ...half.map(([q, r, o]): [number, number, Tile['obstacle']] => [FIELD_WIDTH - 1 - q, r, o])]);
+  placeObstacles(tiles, FIELD_WIDTH, [...half, ...half.map(([q, r, o]): [number, number, Tile['obstacle']] => [mirror({ q, r }).q, r, o])]);
   let seed = 2026;
   const vary = (base: number, spread: number) => {
     seed = (seed * 1664525 + 1013904223) >>> 0;
@@ -88,32 +95,36 @@ function openField(): BattleSetup {
     meleeDefense: vary(6, 3), rangedDefense: vary(5, 3),
     headArmor: archer ? vary(25, 5) : vary(45, 8), bodyArmor: archer ? vary(40, 5) : vary(70, 10),
   });
-  const warriorRows = Array.from({ length: 14 }, (_, i) => 3 + i);
-  const archerRows = [5, 7, 9, 11, 13, 15];
+  // A compact block that fits the Líder de Combate's 5-hex command range: shields in front, spears behind,
+  // archers at the back and the leader in the middle of them.
+  const warriorAt = (i: number): Hex => ({ q: i % 2 ? 8 : 9, r: 6 + (i >> 1) });
+  const archerRows = [6, 7, 8, 10, 11, 12];
+  const leaderAt: Hex = { q: 7, r: 9 };
   const units: Unit[] = [
-    makeLeader('lider-supremo', 'Líder Supremo', 'ally', 'captain', { q: 6, r: 10 }, longsword, 'combate',
+    makeLeader('duarte', 'Duarte', 'ally', 'captain', leaderAt, longsword, 'combate',
       { hp: 60, maxFatigue: 90, resolve: 55, initiative: 95, meleeSkill: 60, rangedSkill: 35, meleeDefense: 10, rangedDefense: 8,
-        headArmor: 90, bodyArmor: 120, platoonId: 'pelotao-supremo' }, true),
-    makeLeader('senhor-da-guerra', 'Senhor da Guerra', 'enemy', 'warlord', { q: 23, r: 9 }, warAxe, 'combate',
+        headArmor: 90, bodyArmor: 120, platoonId: 'pelotao-duarte' }),
+    makeLeader('senhor-da-guerra', 'Senhor da Guerra', 'enemy', 'warlord', mirror(leaderAt), warAxe, 'combate',
       { hp: 60, maxFatigue: 90, resolve: 52, initiative: 92, meleeSkill: 60, rangedSkill: 35, meleeDefense: 9, rangedDefense: 7,
         headArmor: 85, bodyArmor: 115, platoonId: 'bando-senhor' }),
   ];
+  // Mace and blade are one-handed, so those fighters carry a shield; spears and bows take both hands.
   const deploy = (team: 'ally' | 'enemy', id: string, name: string, asset: Unit['asset'], pos: Hex, weapon: Weapon, archer: boolean) =>
     units.push(makeUnit(id, name, team, asset, pos, weapon,
-      { ...troop(archer), platoonId: team === 'ally' ? 'pelotao-supremo' : 'bando-senhor' }));
-  warriorRows.forEach((r, i) => {
-    deploy('ally', `aliado-${i + 1}`, ALLY_NAMES[i], i % 2 ? 'tome' : 'iria', { q: 8, r }, i % 2 ? spear : mace, false);
+      { ...troop(archer), shield: weapon === mace || weapon === raidBlade, platoonId: team === 'ally' ? 'pelotao-duarte' : 'bando-senhor' }));
+  for (let i = 0; i < 14; i++) {
+    deploy('ally', `aliado-${i + 1}`, ALLY_NAMES[i], i % 2 ? 'tome' : 'iria', warriorAt(i), i % 2 ? spear : mace, false);
     deploy('enemy', `inimigo-${i + 1}`, `${i % 2 ? 'Penitente' : 'Saqueador'} ${i + 1}`, i % 2 ? 'husk' : 'raider',
-      { q: 21, r }, i % 2 ? spear : cleaver, false);
-  });
+      mirror(warriorAt(i)), i % 2 ? spear : raidBlade, false);
+  }
   archerRows.forEach((r, i) => {
-    deploy('ally', `aliado-arco-${i + 1}`, ALLY_NAMES[14 + i], 'nara', { q: 5, r }, bow, true);
-    deploy('enemy', `inimigo-arco-${i + 1}`, `Arqueiro proscrito ${i + 1}`, 'raider', { q: 24, r }, bow, true);
+    deploy('ally', `aliado-arco-${i + 1}`, ALLY_NAMES[14 + i], 'nara', { q: 6, r }, bow, true);
+    deploy('enemy', `inimigo-arco-${i + 1}`, `Arqueiro proscrito ${i + 1}`, 'raider', mirror({ q: 6, r }), bow, true);
   });
   return {
     encounter: 'campo-aberto', width: FIELD_WIDTH, height: FIELD_HEIGHT, tiles, units,
     platoons: [
-      { id: 'pelotao-supremo', team: 'ally', name: 'O pelotão do Líder Supremo', leaderId: 'lider-supremo' },
+      { id: 'pelotao-duarte', team: 'ally', name: 'O pelotão de Duarte', leaderId: 'duarte' },
       { id: 'bando-senhor', team: 'enemy', name: 'O bando do Senhor da Guerra', leaderId: 'senhor-da-guerra' },
     ],
   };

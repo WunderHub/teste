@@ -1,8 +1,8 @@
 # Design de combate: líderes, pelotões e ordens
 
-Documento vivo do combate de *Vale do Sal*. Versão 0.1, de 1º de novembro de 2026.
+Documento vivo do combate de *Vale do Sal*. Versão 0.3, de 1º de novembro de 2026.
 
-Ele registra o que o chefe (Kauê) já decidiu e propõe como preencher o que ainda falta. **Só a fase 1 está implementada** (veja a [seção 11](#11-ponte-com-o-protótipo-atual)): líderes, subclasses, pelotões, nota de atributo, mapa maior com câmera e a batalha de teste de 20 contra 20.
+Ele registra o que o chefe (Kauê) já decidiu e propõe como preencher o que ainda falta. **As fases 1 e 2 estão implementadas** (veja a [seção 11](#11-ponte-com-o-protótipo-atual)): líderes, subclasses, pelotões, nota de atributo, mapa maior com câmera, batalha de teste de 20 contra 20, aba de comando com as sete ordens, IA de tropa seguindo ordens, IA de ordens do líder inimigo e comandante interino.
 
 ## Como ler este documento
 
@@ -17,11 +17,13 @@ Todo número marcado como proposta serve só para começar a testar. O balanceam
 ## Resumo
 
 - O player não comanda uma companhia de mercenários. Ele comanda uma **facção** recém-criada, liderada pelo **Líder Supremo** (o personagem dele) e por outros **líderes**.
+- O Líder Supremo **normalmente fica fora das batalhas**: se ele morrer, a campanha acaba. O player manda os outros líderes, e o Supremo só entra em campo como **último recurso**.
 - Em combate, o player controla **só os líderes**. As **tropas** agem por IA e seguem as **ordens** do líder do seu **pelotão**.
 - A conta ideal é **1 líder para cada 20 tropas**. Tropa demais deixa o líder **Sobrecarregado**. Líder sobrando coloca as tropas sob **Pressão de liderança**.
 - As ordens saem da **aba de comando**, custam **PL** (pontos de liderança), valem por **3 turnos** e só chegam a quem está no **alcance**.
 - Fora de combate, o pelotão age **todo de uma vez**. Quando alguém do grupo ataca ou é atacado, o grupo passa a agir **um por um, por iniciativa**.
 - Até **100 tropas por lado**. O inimigo segue as mesmas regras, com líderes dele.
+- A meta da IA é ser **melhor que a de *Battle Brothers***, medida por testes automáticos (veja a [seção 10](#10-ia)).
 - A base tática segue o gênero de *Battle Brothers* (hexágonos, pontos de ação, fadiga, atributos, traços, moral, zona de controle), com regras, nomes e números próprios. É inspiração, não cópia.
 
 ## 1. Visão e escopo
@@ -37,7 +39,7 @@ Todo número marcado como proposta serve só para começar a testar. O balanceam
 | Termo | Significado |
 | --- | --- |
 | Facção | O lado do player na campanha. |
-| Líder Supremo | O personagem do player. É um líder. |
+| Líder Supremo | O personagem do player. É um líder, mas normalmente fica fora das batalhas, porque a morte dele encerra a campanha. |
 | Líder | Combatente controlado pelo player. Tem subclasse, PA, PL e alcance de comando. Luta em campo. |
 | Subclasse | Combate, Estratégico ou Encorajador. Define atributos e força das ordens do líder. |
 | Tropa | Combatente comum, controlado pela IA. Tem atributos e traços. |
@@ -60,6 +62,7 @@ Todo número marcado como proposta serve só para começar a testar. O balanceam
 **Decidido**
 
 - O Líder Supremo é o personagem do player. Os outros líderes da facção têm uma subclasse cada.
+- O Líder Supremo normalmente **não participa das batalhas**. Se ele morrer, o player **perde a campanha**. Por isso o player escolhe quais líderes mandar para cada batalha, e o Supremo só entra em campo como **último recurso**.
 - Os líderes lutam em campo, como qualquer combatente.
 - Três subclasses por enquanto:
   - **Líder de Combate**: atributos acima do padrão e habilidades para fortalecer aliados próximos.
@@ -79,8 +82,12 @@ Todo número marcado como proposta serve só para começar a testar. O balanceam
 - A **potência** multiplica os bônus das ordens. Exemplo: se "Formar linha defensiva!" dá +10 de defesa corpo a corpo, com o Estratégico ela dá +15.
 - O alcance curto do Líder de Combate combina com "fortalecer aliados próximos": ele comanda de dentro da linha de frente.
 - Nesta fase, a função do líder em combate é dar ordens. As habilidades próprias de cada subclasse (auras, gritos de guerra, efeitos de moral) ficam para uma fase seguinte.
+- **Líder Supremo em campo**: se ele morrer, a batalha termina na hora em derrota e a campanha acaba, mesmo que o resto do exército esteja vencendo. Fugir do campo não conta: ele sobrevive e a batalha segue com os outros líderes.
+- **Escolha dos líderes**: na tela de preparação (fase 4), os outros líderes aparecem primeiro. O Supremo fica separado, com um aviso do risco, e pede confirmação para entrar. O player pode levá-lo mesmo assim, mas o jogo nunca o coloca em campo sozinho.
+- A mesma regra vale para o inimigo: se um líder supremo inimigo cair em batalha, o lado dele perde na hora. Isso abre espaço para batalhas decisivas na campanha.
+- A batalha de teste "Campo das Salinas" usa um líder comum, Duarte (Líder de Combate), e não o Supremo.
 
-**Em aberto**: se o Líder Supremo tem subclasse e o que acontece quando ele cai (perguntas 1 e 2).
+**Em aberto**: se o Líder Supremo tem subclasse própria (pergunta 1) e se ele pode ser escolhido quando ainda há outros líderes disponíveis (pergunta 20).
 
 ## 4. Tropas
 
@@ -96,6 +103,7 @@ Todo número marcado como proposta serve só para começar a testar. O balanceam
 - Observação: a soma simples favorece quem tem Vida, Fadiga e Iniciativa altas, porque esses números são maiores que os de defesa. Se o comandante escolhido parecer estranho nos testes, dá para usar pesos depois.
 - A divisão (guerreiro ou arqueiro) depende da arma na mão no momento da ordem.
 - Os traços mudam atributos e também o comportamento da IA. Exemplos: um "Disciplinado" segura melhor a formação, um "Cabeça-dura" obedece com atraso. A lista de traços fica para outro documento.
+- **Escudo**: quem luta com arma de uma mão (maça, lâmina) carrega escudo. Lança, arco e as armas dos líderes são de duas mãos, sem escudo. O escudo importa para "Levantar escudos!".
 
 ## 5. Pelotões e a regra de 1 líder para 20 tropas
 
@@ -176,7 +184,11 @@ O efeito de cada ordem foi decidido pelo chefe. Os números são proposta.
 - **Dar ordem não gasta PA**. O líder pode dar a ordem e ainda andar ou atacar no mesmo turno.
 - **Ordem para "todos"** custa o mesmo PL que para uma divisão só.
 - **Alcance**: conta a distância em hexágonos entre o líder e a tropa no momento da ordem. Não precisa de linha de visão.
-- **Tropa fora do alcance** segue a última ordem que recebeu mesmo depois dos 3 turnos, até voltar ao alcance e receber outra. Ela fica "sem notícias". Isso dá peso a manter o pelotão perto do líder.
+- **Tropa fora do alcance** segue a última ordem que recebeu mesmo depois dos 3 turnos, até voltar ao alcance. Ela fica "sem notícias": cumpre o comportamento da ordem, mas **sem o bônus**, que acaba junto com os 3 turnos. Isso dá peso a manter o pelotão perto do líder e impede que uma ordem velha renda bônus para sempre.
+- **Atacar!**: o bônus vale no primeiro ataque que a tropa faz por vontade própria durante a ordem. Ataques de reação (zona de controle) não usam nem gastam o bônus.
+- **Preparar disparo**: mirar gasta o turno inteiro. Nos turnos seguintes, todos os tiros no alvo mirado ganham o bônus (até 2 por turno, por causa dos PA). Andar perde a mira. Se o alvo cair, fugir ou sair da linha de tiro, o arqueiro mira em outro.
+- **Quem dá ordens**: o líder do pelotão ou, sem nenhum líder vivo no lado, o comandante interino. O líder em fuga não dá ordens até recobrar a coragem.
+- **Sem pelotão**: combatentes sem pelotão (só existem no encontro antigo de 3 contra 4, usado nos testes) lutam por conta própria, avançando e atacando.
 
 ## 7. Morte do líder e sucessão
 
@@ -190,7 +202,8 @@ O efeito de cada ordem foi decidido pelo chefe. Os números são proposta.
 - As tropas vão para o líder vivo mais próximo que ainda tenha vaga (menos de 20 tropas). Se ninguém tem vaga, vão todas para o mais próximo. Depois o player pode redistribuir com as regras normais de transferência.
 - A morte do líder causa um teste de moral negativo extra nas tropas do pelotão dele, além do teste normal pela morte de um aliado.
 - As tropas herdadas continuam com a ordem que tinham até o novo líder dar outra.
-- O **comandante interino** é escolhido entre todas as tropas vivas do lado. Ele dá ordens pela mesma IA dos líderes inimigos, com 6 PL por turno e 5 hex de alcance. Se ele cair, a próxima maior nota assume.
+- O **comandante interino** é escolhido entre todas as tropas vivas do lado. Ele dá ordens pela mesma IA dos líderes inimigos, com 6 PL por turno e 5 hex de alcance. Se ele cair, a próxima maior nota assume. (Implementado na fase 2.)
+- **Exceção do Líder Supremo**: se quem caiu foi o Supremo, não há sucessão. A batalha termina em derrota na hora (seção 3).
 - No modo automático, o player assiste. A tela ganha controles de velocidade e um botão para pular até o resultado.
 
 ```mermaid
@@ -260,6 +273,7 @@ flowchart TD
 
 - As tropas do player que não são controladas diretamente têm uma IA que tenta seguir as ordens do líder.
 - Os líderes inimigos funcionam como os do player e precisam de uma IA boa para tomar decisões decentes.
+- A IA tem que ser **superior à de *Battle Brothers***.
 
 **Proposta**
 
@@ -297,7 +311,30 @@ Decide as ordens, o movimento do próprio líder e as transferências de tropas.
 - **Estratégia do lado**: escolhe o flanco de cada pelotão, mantém a proporção de 20 por líder, protege os próprios líderes (perder um líder custa caro) e caça os líderes do player.
 - **Personalidades**: agressiva, cautelosa e oportunista, mudando os pesos. Facções inimigas diferentes podem ter personalidades diferentes.
 
-### 10.4 Como garantir que a IA é boa
+### 10.4 A meta: melhor que a de *Battle Brothers*
+
+Não dá para colocar as duas IAs para jogar uma contra a outra, então "melhor" vira uma lista de habilidades que um oponente tático forte precisa mostrar. Cada uma ganha um teste automático, e o chefe confere jogando. Se a IA fizer uma jogada boba numa partida, a situação vira um teste novo.
+
+| # | Habilidade | Como aparece no jogo | Fase |
+| ---: | --- | --- | ---: |
+| 1 | Concentrar ataques | Prefere terminar um ferido a espalhar golpes. Pesa a chance de matar. | 2 |
+| 2 | Não dar ataque grátis | Só sai de uma zona de controle inimiga quando o ganho compensa o risco. | 2 |
+| 3 | Escolher o alvo certo | Pesa chance de acerto, dano esperado na vida e na armadura, arqueiros soltos e líderes. | 2 |
+| 4 | Cercar | Usa o bônus de cerco e ataca de vários lados. | 2 |
+| 5 | Preservar a vida | Tropa ferida ou abalada evita trocas ruins. Arqueiro engajado recua. O líder IA se expõe menos que a tropa. | 2 |
+| 6 | Cumprir a ordem do jeito certo | Linha defensiva não persegue, avanço devagar não abre buraco, arqueiros procuram linha de tiro. | 2 |
+| 7 | Ficar no alcance do líder | A tropa evita sair do alcance de comando, para não ficar sem notícias. | 2 |
+| 8 | Dar a ordem certa na hora certa | Líder IA lê força, distância e arqueiros de cada lado, e combina ordens para guerreiros e arqueiros. | 2 (v1), 5 (v2) |
+| 9 | Coordenar o pelotão | Divide alvos e decide quem age primeiro na vez de grupo. | 3 |
+| 10 | Pensar no lado inteiro | Escolhe flancos, protege os próprios líderes e caça os do player. | 5 |
+
+A IA nunca trapaceia (seção 10, início). A régua de aprovação:
+
+- **Torneio contra a versão anterior**: exércitos espelhados, trocando de lado, várias sementes. A IA nova precisa vencer com folga dos dois lados para entrar. Na fase 2, a régua é a IA antiga do protótipo (avança e ataca o mais próximo).
+- **Testes de comportamento**: um por habilidade da tabela.
+- **Teste do chefe**: as partidas do chefe são a prova final.
+
+### 10.5 Como garantir que a IA é boa
 
 - **Torneios automáticos** de IA contra IA nos testes (o `src/game.test.ts` já simula batalhas inteiras): exércitos espelhados, trocando de lado, com centenas de sementes. Mede vitórias, duração e perdas.
 - **Testes de comportamento por ordem**, por exemplo: "com Formar linha defensiva!, nenhum guerreiro avança mais de 1 hex" e "com Arqueiros, disparem!, todo arqueiro com alvo na linha de tiro atira".
@@ -317,11 +354,11 @@ Decide as ordens, o movimento do próprio líder e as transferências de tropas.
 
 **Fases sugeridas**:
 
-1. ✅ Modelo de dados (líder, tropa, pelotão, nota de atributo), mapa maior com câmera e um encontro de teste de 20 contra 20, com 1 líder por lado. Até a fase 2, as tropas usam a IA antiga: avançam e atacam o inimigo mais próximo.
-2. Aba de comando: ordens, PL, recarga, alcance e a IA de tropa seguindo ordens.
+1. ✅ Modelo de dados (líder, tropa, pelotão, nota de atributo), mapa maior com câmera e um encontro de teste de 20 contra 20, com 1 líder por lado.
+2. ✅ Aba de comando: ordens, PL, recarga, alcance e a IA de tropa seguindo ordens. Entraram também a IA de ordens do líder inimigo (versão 1), o comandante interino e a regra do Líder Supremo (a batalha de teste passou a usar um líder comum). Para o torneio de IA ser justo, a batalha de teste ficou espelhada (mesmo terreno, mesmo bloco de formação dentro dos 5 hex de alcance) e os saqueadores do campo ganharam o cutelo de saque, que bate como a maça. Empates de iniciativa passaram a ser sorteados pela semente, sem favorecer um lado.
 3. Vez de grupo e passagem para iniciativa no contato.
-4. Regra de 20 por líder (Sobrecarregado e Pressão de liderança), transferências, sucessão e comandante interino.
-5. Líderes inimigos com IA, escala de 100 contra 100, otimização e Web Worker.
+4. Tela de preparação (escolher os líderes, com o Supremo só como último recurso, e distribuir as tropas), regra de 20 por líder (Sobrecarregado e Pressão de liderança), transferências e sucessão entre líderes.
+5. IA de líder versão 2 (simulação), estratégia do lado, escala de 100 contra 100, otimização e Web Worker.
 6. Habilidades das subclasses e traços das tropas.
 
 ## 12. Perguntas em aberto
@@ -331,7 +368,7 @@ Cada pergunta já tem uma proposta. Se o chefe não mudar, a proposta vale.
 | # | Pergunta | Proposta |
 | ---: | --- | --- |
 | 1 | O Líder Supremo tem subclasse própria ou escolhe uma das três? | Escolhe uma das três. |
-| 2 | Se o Líder Supremo cair, a batalha acaba em derrota? | Não. Os outros líderes seguem no comando. A campanha decide o que a morte dele significa. |
+| 2 | Se o Líder Supremo cair, a batalha acaba em derrota? | **Decidida pelo chefe**: a morte dele encerra a campanha, então ele normalmente fica fora das batalhas. Se estiver em campo e cair, a batalha acaba em derrota na hora. |
 | 3 | Sobrecarga e pressão pioram com o tamanho do excesso (25 tropas pior que 21)? | Não nesta fase. Efeito fixo. |
 | 4 | A Pressão de liderança aparece quando o lado perde tropas no meio da luta? | Não. Só no posicionamento, em transferências e na morte de um líder. |
 | 5 | A recarga é separada por divisão (guerreiros e arqueiros) ou uma só para o líder? | Separada por divisão. |
@@ -349,8 +386,12 @@ Cada pergunta já tem uma proposta. Se o chefe não mudar, a proposta vale.
 | 17 | A posição do grupo na fila vem da iniciativa do líder ou da média do grupo? | Iniciativa do líder. |
 | 18 | Vai ter névoa de guerra? Isso muda bastante a IA. | Não nesta fase. |
 | 19 | Arma de arremesso (dardo, machadinha) conta como arqueiro? | Decidir quando essas armas existirem. |
+| 20 | O Supremo pode ir para a batalha quando ainda há outros líderes disponíveis? | Pode, com confirmação e aviso do risco. A tela sempre sugere os outros líderes primeiro. |
+| 21 | A tropa sem notícias (fora do alcance, ordem vencida) mantém o bônus da ordem? | Não. Mantém o comportamento e perde o bônus. |
+| 22 | Quem tem escudo? | Quem usa arma de uma mão (maça, lâmina). Lança, arco e as armas dos líderes não. |
 
 ## Histórico
 
 - **0.1 (2026-11-01)**: primeira versão, a partir das conversas com o chefe no projeto.
 - **0.2 (2026-11-01)**: fase 1 implementada.
+- **0.3 (2026-11-01)**: o Líder Supremo fica fora das batalhas e a morte dele encerra a campanha (decisão do chefe). Meta de IA melhor que a de *Battle Brothers*, com a lista de habilidades e a régua de aprovação. Fase 2 implementada.
