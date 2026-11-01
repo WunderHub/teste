@@ -107,9 +107,15 @@ export interface BattleEvent {
   unitId?: string; targetId?: string; from?: Hex; to?: Hex; order?: OrderId;
   hit?: boolean; damage?: number; message?: string;
   armorDamage?: number; location?: 'head' | 'body';
+  /** A missed arrow that struck one of the shooter's own side instead; `from` is then the hex of the enemy it missed. */
+  stray?: boolean;
 }
 export interface ActionResult { ok: boolean; message: string; events: BattleEvent[] }
-export interface AttackPreview { allowed: boolean; reason: string; chance: number; ap: number; fatigue: number }
+export interface AttackPreview {
+  allowed: boolean; reason: string; chance: number; ap: number; fatigue: number;
+  /** Chance, in percent, that this shot misses and strikes one of the shooter's own side in contact with the target. */
+  friendlyRisk: number;
+}
 
 export const key = ({ q, r }: Hex): string => `${q},${r}`;
 const same = (a: Hex, b: Hex): boolean => a.q === b.q && a.r === b.r;
@@ -182,15 +188,24 @@ function roundedHex(values: number[]): Hex {
   rounded[largest] = -rounded[(largest + 1) % 3] - rounded[(largest + 2) % 3];
   return { q: rounded[0] + (rounded[2] - (rounded[2] & 1)) / 2, r: rounded[2] };
 }
-/** Prototype LOS: solid obstacles and standing units fully block a single center ray. */
+/** Line of fire along a single center ray. Arrows arc over combatants, friend or foe; only solid obstacles block them. */
 function clearLine(s: BattleState, from: Hex, to: Hex): boolean {
   const length = distance(from, to), a = cube(from), b = cube(to);
   for (let i = 1; i < length; i++) {
     const hex = roundedHex(a.map((v, axis) => v + (b[axis] - v) * i / length));
-    if (tileAt(s, hex)?.obstacle || occupant(s, hex)) return false;
+    if (tileAt(s, hex)?.obstacle) return false;
   }
   return true;
 }
+
+/** A missed arrow can strike someone of the shooter's own side who is fighting next to the target: this chance per friend, up to the cap. */
+export const STRAY_SHOT = { perFriend: 35, max: 70 };
+/** The shooter's side next to the target: a missed arrow may hit one of them. Melee blows never go astray. */
+export const strayCandidates = (s: BattleState, unit: Unit, target: Unit): Unit[] => unit.weapon.kind !== 'ranged' ? []
+  : s.units.filter(v => alive(v) && v.team === unit.team && v.id !== unit.id && distance(v.pos, target.pos) === 1);
+/** Chance, in percent, that a missed shot strikes one of the stray candidates. */
+export const strayChance = (s: BattleState, unit: Unit, target: Unit): number =>
+  Math.min(STRAY_SHOT.max, STRAY_SHOT.perFriend * strayCandidates(s, unit, target).length);
 
 /** The order a troop follows, if it still carries its bonus. */
 const bonusOrder = (u: Unit, id: OrderId): TroopOrder | undefined =>
@@ -232,8 +247,9 @@ function strikeBlocker(s: BattleState, unit: Unit, target: Unit, checkCosts: boo
   return '';
 }
 export function previewAttack(s: BattleState, unit: Unit, target: Unit): AttackPreview {
-  const reason = strikeBlocker(s, unit, target, true);
-  return { chance: hitChance(s, unit, target), ap: unit.weapon.ap, fatigue: unit.weapon.fatigue, allowed: !reason, reason };
+  const reason = strikeBlocker(s, unit, target, true), chance = hitChance(s, unit, target);
+  const friendlyRisk = Math.round((100 - chance) * strayChance(s, unit, target) / 100);
+  return { chance, ap: unit.weapon.ap, fatigue: unit.weapon.fatigue, allowed: !reason, reason, friendlyRisk };
 }
 /** True when a ranged unit has a clear shot at the target right now, whatever its PA. */
 export const hasShot = (s: BattleState, unit: Unit, target: Unit): boolean =>
@@ -347,8 +363,23 @@ function resolveStrike(s: BattleState, unit: Unit, target: Unit, events: BattleE
   if (!hit) {
     emit(s, events, { type: 'attack', unitId: unit.id, targetId: target.id, hit: false, damage: 0,
       message: `${unit.name} ${reaction ? 'reage, mas erra' : 'erra o ataque contra'} ${target.name}.` });
+    if (!reaction) strayShot(s, unit, target, events);
     return false;
   }
+  wound(s, unit, target, events, `${unit.name} ${reaction ? 'intercepta' : 'atinge'} ${target.name}`);
+  return true;
+}
+
+/** A missed arrow may come down on a friend fighting next to the target. */
+function strayShot(s: BattleState, unit: Unit, target: Unit, events: BattleEvent[]): void {
+  const friends = strayCandidates(s, unit, target);
+  if (!friends.length || roll(s, 1, 100) > strayChance(s, unit, target)) return;
+  const friend = friends[roll(s, 0, friends.length - 1)];
+  wound(s, unit, friend, events, `A flecha de ${unit.name} se desvia e acerta ${friend.name}`, target.pos);
+}
+
+/** Damage, death and morale for a blow that landed. */
+function wound(s: BattleState, unit: Unit, target: Unit, events: BattleEvent[], lead: string, strayFrom?: Hex): void {
   const head = roll(s, 1, 100) <= 25;
   const armorKey = head ? 'headArmor' : 'bodyArmor';
   const raw = roll(s, unit.weapon.minDamage, unit.weapon.maxDamage);
@@ -361,8 +392,8 @@ function resolveStrike(s: BattleState, unit: Unit, target: Unit, events: BattleE
   const overflow = target[armorKey] === 0 ? Math.max(0, raw * (1 - unit.weapon.penetration) - armorDamage) : 0;
   const damage = Math.min(target.hp, Math.max(0, Math.floor((penetration + overflow) * (head ? 1.5 : 1))));
   target.hp -= damage;
-  emit(s, events, { type: 'attack', unitId: unit.id, targetId: target.id, hit: true, damage, armorDamage,
-    location: head ? 'head' : 'body', message: `${unit.name} ${reaction ? 'intercepta' : 'atinge'} ${target.name}${head ? ' na cabeça' : ''}: −${damage} vida, −${armorDamage} armadura.` });
+  emit(s, events, { type: 'attack', unitId: unit.id, targetId: target.id, hit: true, damage, armorDamage, ...(strayFrom ? { stray: true, from: { ...strayFrom } } : {}),
+    location: head ? 'head' : 'body', message: `${lead}${head ? ' na cabeça' : ''}: −${damage} vida, −${armorDamage} armadura.` });
   if (target.hp <= 0) {
     target.dead = true;
     s.queue = s.queue.filter(id => id !== target.id);
@@ -375,7 +406,6 @@ function resolveStrike(s: BattleState, unit: Unit, target: Unit, events: BattleE
     moraleCheck(s, target, false, events, 40 * (1 - target.hp / target.maxHp));
   }
   checkOutcome(s, events);
-  return true;
 }
 
 function activate(s: BattleState, events: BattleEvent[]): void {
@@ -619,7 +649,7 @@ export const ORDERS: readonly OrderInfo[] = [
   { id: 'levantar-escudos', label: 'Levantar escudos!', mark: 'E', pl: 4, targets: ['todos', 'guerreiros'],
     summary: `+${ORDER_BONUS.escudos} de defesa corpo a corpo e à distância para quem tem escudo. Andam no máximo 1 hexágono.` },
   { id: 'arqueiros-disparem', label: 'Arqueiros, disparem!', mark: 'T', pl: 2, targets: ['arqueiros'],
-    summary: 'Atiram no alvo que mais vale a flecha ao alcance. Sem alvo, andam até ter linha de tiro.' },
+    summary: 'Atiram por cima da linha no alvo que mais vale a flecha. Seguram o tiro se o risco de acertar um aliado não compensar.' },
   { id: 'arqueiros-preparar', label: 'Arqueiros, preparar disparo!', mark: 'M', pl: 3, targets: ['arqueiros'],
     summary: `Miram um turno sem atirar. Depois, +${ORDER_BONUS.mira} de ataque à distância no alvo mirado. Andar perde a mira.` },
   { id: 'atacar', label: 'Atacar!', mark: 'A', pl: 4, targets: EVERYONE,

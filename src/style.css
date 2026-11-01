@@ -247,6 +247,7 @@ kbd { font: 9px var(--sans); border: 1px solid #9aa48b42; min-width: 15px; heigh
 .preview-cost { font-size: 10px; color: var(--copper); margin-top: 8px; }
 .attack-preview.is-blocked .preview-chance strong { color: var(--red); }
 .attack-preview.is-blocked > p { color: #bd9485; }
+.attack-preview.is-risky > p { color: #e0b46a; }
 
 .modal-backdrop { position: absolute; inset: 0; display: grid; place-items: center; padding: 20px; background: #0a1412a3; backdrop-filter: blur(5px); pointer-events: auto; z-index: 30; }
 .battle-modal { position: relative; background: radial-gradient(ellipse at 50% 0, #3a41332b, transparent 70%), #17211e; border: 1px solid #b4a47780; padding: 33px 38px 30px; box-shadow: 0 25px 100px #030a0799, inset 0 0 0 5px #b1ad7a05; max-width: 100%; max-height: calc(100dvh - 40px); overflow-y: auto; outline: none; scrollbar-color: #766e50 #17211e; scrollbar-width: thin; }
