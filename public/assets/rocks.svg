@@ -1,12 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
-<ellipse cx="50" cy="81" rx="42" ry="10" fill="#131D18" opacity=".5"/>
-<path d="m8 69 13-27 24-6 17 24-6 22-30 5Z" fill="#566154" stroke="#202B24" stroke-width="2"/>
-<path d="m21 42 24-6-9 24-28 9Z" fill="#818B74"/>
-<path d="m36 60 9-24 17 24-6 22Z" fill="#35483C"/>
-<path d="m42 70 8-42 23-11 19 24-3 37-24 9Z" fill="#66715F" stroke="#202B24" stroke-width="2"/>
-<path d="m50 28 23-11-5 30-26 23Z" fill="#8A927B"/>
-<path d="m68 47 5-30 19 24-3 37-24 9Z" fill="#405044"/>
-<path d="m52 41 8-11m-9 16 11-12m7 24 9 10m-3-16 10 11M20 54l7-9m-9 15 10-10" stroke="#B5B59B" stroke-width="1.5" opacity=".45" fill="none"/>
-<path d="m21 80 9-8 13 4 4 11-17 4Zm42 1 11-9 12 7 2 10-22 1Z" fill="#7C8570" stroke="#2D3C31" stroke-width="2"/>
-<path d="m24 81 7-5 7 2m32 4 5-5 6 3" stroke="#D3CEB3" stroke-width="2" fill="none"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><defs><linearGradient id="stone" x2=".8" y2="1"><stop stop-color="#a5a58b"/><stop offset=".4" stop-color="#757f6b"/><stop offset="1" stop-color="#384a3d"/></linearGradient><linearGradient id="bark" x2="1" y2=".3"><stop stop-color="#333b2b"/><stop offset=".4" stop-color="#7c7755"/><stop offset=".55" stop-color="#625f42"/><stop offset="1" stop-color="#303d2c"/></linearGradient><radialGradient id="s"><stop stop-color="#121e15" stop-opacity=".7"/><stop offset="1" stop-color="#121e15" stop-opacity="0"/></radialGradient></defs><ellipse cx="52" cy="89" rx="46" ry="9" fill="url(#s)"/><g stroke="#344335" stroke-width="1.2" stroke-linejoin="round"><path d="M9 77L17 52 34 43 52 55 56 83 35 91 14 87Z" fill="url(#stone)"/><path d="M31 56L39 27 64 15 81 30 88 65 74 85 51 87Z" fill="url(#stone)"/><path d="M64 15L60 46 74 85 88 65 81 30Z" fill="#4b5c4a"/><path d="M39 28L61 20 54 44 35 58Z" fill="#abb098" opacity=".5"/><path d="M61 21L54 43 57 50M46 37L42 48 38 49M66 30L70 39 67 49 73 56M17 57L28 51 32 55M24 72L30 65 29 58" fill="none" stroke="#ced0b0" stroke-width=".8" opacity=".6"/><path d="M65 54L59 61 63 70 60 77M34 70L42 73 47 83" fill="none" stroke="#263d30"/><path d="M5 87L12 76 25 78 30 87 21 94 7 92M69 90L76 79 87 78 95 86 88 94 75 94" fill="url(#stone)"/><path d="M11 81L21 81M78 83L86 82" stroke="#adb198"/><path d="M33 86L41 82 49 85 44 90 33 92M73 71L79 67 82 73 78 79" fill="#798052" stroke="none" opacity=".65"/></g></svg>

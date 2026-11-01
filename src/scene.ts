@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { paintGround } from './terrain-art';
 import {
   getActive, key, distance, neighbors, reachable, moveAp, previewAttack, move, attack, waitTurn, endTurn,
   isPlayerControlled, tileAt, checkOrder, issueOrder, commandedPlatoons, commanderOf, platoonOf, platoonTroops, divisionOf, orderInfo, ORDERS,
@@ -171,48 +172,23 @@ export class CombatScene extends Phaser.Scene {
 
   private createTerrain() {
     const width = Math.ceil(this.world.width + 2 * TERRAIN_X), height = Math.ceil(this.world.height + 2 * TERRAIN_Y);
-    const area = width * height / (2200 * 1500), sx = width / 2200, sy = height / 1500;
     const texture = this.textures.createCanvas('terrain', width, height)!;
-    const ctx = texture.context;
-    let seed = 23761;
-    const random = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-    ctx.fillStyle = '#414737'; ctx.fillRect(0, 0, width, height);
-    const colors = ['#494d3c', '#3b4435', '#50513e', '#535541', '#394233'];
-    for (let i = 0; i < 130 * area; i++) {
-      ctx.fillStyle = colors[i % colors.length]; ctx.globalAlpha = 0.4 + random() * 0.3;
-      ctx.beginPath(); ctx.ellipse(random() * width, random() * height, 45 + random() * 180, 15 + random() * 65, random(), 0, Math.PI * 2); ctx.fill();
-    }
-    ctx.globalAlpha = 1; ctx.strokeStyle = '#555640'; ctx.lineWidth = 92; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(90 * sx, 1190 * sy);
-    ctx.bezierCurveTo(440 * sx, 900 * sy, 610 * sx, 1030 * sy, 960 * sx, 780 * sy);
-    ctx.bezierCurveTo(1320 * sx, 530 * sy, 1500 * sx, 740 * sy, 2200 * sx, 450 * sy); ctx.stroke();
-    ctx.strokeStyle = '#5f6048'; ctx.lineWidth = 31; ctx.globalAlpha = 0.3; ctx.stroke(); ctx.globalAlpha = 1;
-    for (let i = 0; i < 22000 * area; i++) {
-      const x = random() * width, y = random() * height;
-      ctx.fillStyle = i % 3 === 0 ? '#1a2119' : '#a2a185'; ctx.globalAlpha = 0.035 + random() * 0.08;
-      ctx.fillRect(x, y, 1 + random() * 2, 1);
-    }
-    for (let i = 0; i < 1500 * area; i++) {
-      const x = random() * width, y = random() * height, h = 3 + random() * 9;
-      ctx.globalAlpha = 0.18 + random() * 0.28; ctx.strokeStyle = i % 2 ? '#a0a27a' : '#242c22'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(x - 3, y - h * 0.7); ctx.lineTo(x, y); ctx.lineTo(x + 2, y - h); ctx.moveTo(x, y); ctx.lineTo(x + 5, y - h * 0.5); ctx.stroke();
-    }
-    for (let i = 0; i < 650 * area; i++) {
-      ctx.globalAlpha = 0.17 + random() * 0.2; ctx.fillStyle = '#bab59a';
-      ctx.beginPath(); ctx.ellipse(random() * width, random() * height, 1 + random() * 3, 1 + random(), random(), 0, Math.PI * 2); ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-    const radius = Math.max(width, height) / 2;
-    const shade = ctx.createRadialGradient(width / 2, height / 2, radius * 0.23, width / 2, height / 2, radius);
-    shade.addColorStop(0, 'rgba(10,20,15,0)'); shade.addColorStop(1, 'rgba(10,20,15,.5)');
-    ctx.fillStyle = shade; ctx.fillRect(0, 0, width, height);
+    paintGround(texture.context, width, height);
+    let groundSeed = 3917;
+    const random = () => { groundSeed = (groundSeed * 1664525 + 1013904223) >>> 0; return groundSeed / 4294967296; };
     texture.refresh(); this.add.image(-TERRAIN_X, -TERRAIN_Y, 'terrain').setOrigin(0).setDepth(-10);
     const { width: ww, height: wh } = this.world;
     for (const [x, y, asset, size] of [[40, wh * 0.33, 'deadtree', 150], [ww - 60, wh * 0.24, 'rocks', 110], [ww - 50, wh * 0.76, 'deadtree', 160], [70, wh * 0.88, 'rocks', 125]] as const)
       this.add.image(x, y, asset).setDisplaySize(size, size).setAlpha(0.9).setDepth(y - 50);
     for (const tile of this.state.tiles.filter(t => t.terrain === 'rough' && !t.obstacle)) {
       const p = hexToWorld(tile), g = this.add.graphics().setDepth(-1);
-      g.fillStyle(0xaba68b, 0.14).fillEllipse(p.x, p.y, 66, 35); g.lineStyle(1, 0xc0b99b, 0.28);
+      g.lineStyle(1, 0xc0b99b, 0.28);
+      // Salt crust is scattered rather than drawn as a circular tile decal.
+      for (let i = 0; i < 24; i++) {
+        const x = p.x - 28 + random() * 56, y = p.y - 18 + random() * 36;
+        g.fillStyle(i % 3 ? 0xa6a38a : 0xd2cab0, 0.12 + random() * 0.15);
+        g.fillTriangle(x, y, x + 2 + random() * 6, y - 2, x + 4, y + 1 + random() * 3);
+      }
       for (let i = 0; i < 7; i++) { const x = p.x - 25 + random() * 50, y = p.y - 12 + random() * 24; g.lineBetween(x, y, x + 3 + random() * 4, y - 1); }
     }
   }

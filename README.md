@@ -1,6 +1,6 @@
 # Vale do Sal
 
-Protótipo original de combate tático em hexágonos, feito com **Phaser 3 + TypeScript + Vite**. No Campo das Salinas, Duarte e seu pelotão de 20 tropas enfrentam o bando do Senhor da Guerra, também com 20. Você comanda só o líder; as tropas cumprem as ordens dele, pela IA. O Líder Supremo, personagem do jogador, fica fora da batalha: se ele cair em campo, a campanha acaba. Arte vetorial provisória, com bustos sem membros, e interface sobreposta ao próprio campo.
+Protótipo original de combate tático em hexágonos, feito com **Phaser 3 + TypeScript + Vite**. No Campo das Salinas, Duarte e seu pelotão de 20 tropas enfrentam o bando do Senhor da Guerra, também com 20. Você comanda só o líder; as tropas cumprem as ordens dele, pela IA. O Líder Supremo, personagem do jogador, fica fora da batalha: se ele cair em campo, a campanha acaba. Arte vetorial original, com bustos sem membros, e interface sobreposta ao próprio campo. A direção visual está em [`docs/arte.md`](docs/arte.md).
 
 O design completo do combate (líderes, pelotões, ordens e turnos em grupo) está em [`docs/design-combate.md`](docs/design-combate.md). Esta versão implementa as fases 1 e 2 dele.
 

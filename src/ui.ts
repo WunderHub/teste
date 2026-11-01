@@ -107,7 +107,7 @@ export class CombatUI {
         <nav class="battle-tools" aria-label="Opções do combate">
           <button class="tool-button" data-action="speed" title="Velocidade das tropas — V"><span class="speed-symbol" aria-hidden="true">»</span><span class="tool-label" data-ui="speed-label">2×</span></button>
           <button class="tool-button" data-action="help" title="Como jogar" aria-label="Ajuda"><span class="tool-symbol" aria-hidden="true">?</span><span class="tool-label">Ajuda</span></button>
-          <button class="tool-button" data-action="pause" title="Pausar ou retomar — Esc"><span class="pause-symbol" data-ui="pause-icon" aria-hidden="true">Ⅱ</span><span class="tool-label" data-ui="pause-label">Pausar</span></button>
+          <button class="tool-button" data-action="pause" title="Pausar ou retomar — Esc"><span class="pause-symbol" data-ui="pause-icon" aria-hidden="true">II</span><span class="tool-label" data-ui="pause-label">Pausar</span></button>
           <button class="tool-button" data-action="restart" title="Reiniciar este combate"><span class="restart-symbol" aria-hidden="true">↻</span><span class="tool-label">Reiniciar</span></button>
         </nav>
       </header>
@@ -209,7 +209,7 @@ export class CombatUI {
     this.text('encounter', ENCOUNTER_NAMES[state.encounter]);
     this.text('speed-label', `${view.speed}×`);
     this.text('pause-label', view.paused ? 'Retomar' : 'Pausar');
-    this.text('pause-icon', view.paused ? '▷' : 'Ⅱ');
+    this.text('pause-icon', view.paused ? '▷' : 'II');
     this.element.classList.toggle('is-paused', view.paused);
     this.element.classList.toggle('is-busy', view.busy);
     this.element.dataset.mode = view.mode;
