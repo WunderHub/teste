@@ -55,7 +55,7 @@ Cada lado tem 1 líder, 14 guerreiros (maça ou lança do nosso lado, cutelo ou 
 - **Sem habilidades especiais**, como Recuperar ou atordoar. O que muda o combate são as ordens (abaixo); o escudo só conta com a ordem de levantar escudos.
 - Armaduras de cabeça e corpo são independentes. Ataques podem penetrar armadura. A chance básica de atingir a cabeça é 25%, com multiplicador de 1,5 no dano à vida.
 - Sair de um hexágono ameaçado por um inimigo corpo a corpo provoca uma reação gratuita. Isso também vale para circular ao redor dele. Acertar a reação interrompe o movimento; o passo tentado já consome recursos.
-- Arcos não disparam quando o portador está engajado por um inimigo corpo a corpo. Obstáculos e unidades podem bloquear a linha de tiro. Os arcos iniciais têm flechas ilimitadas; gestão de munição fica para a expansão de equipamentos.
+- Arcos não disparam quando o portador está engajado por um inimigo corpo a corpo. Flechas passam por cima de quem estiver no caminho, aliado ou inimigo; só obstáculos bloqueiam a linha de tiro. Se a flecha errar e houver aliados do atirador em contato com o alvo, ela pode acertar um deles: 35% por aliado em contato, no máximo 70%. A ficha do alvo e a dica do mouse mostram esse risco. Os arcos iniciais têm flechas ilimitadas; gestão de munição fica para a expansão de equipamentos.
 - A moral possui cinco estados: confiante, firme, abalado, à beira do pânico e em fuga. Testes de determinação respondem a ferimentos, perdas e pressão próxima. Combatentes em fuga procuram uma borda automaticamente.
 - A partida termina quando todos os integrantes de um lado morrem ou escapam, ou na hora em que um Líder Supremo cai em campo. Fugir não conta como queda. A IA usa o mesmo motor e os mesmos custos do jogador.
 
@@ -69,7 +69,7 @@ Ordens custam PL (pontos de liderança), não PA. O Líder de Combate tem 6 PL p
 | 4 | Avanço rápido! (R) | 3 | todos ou uma divisão | Gastam os PA para fechar a distância. |
 | 5 | Formar linha defensiva! (L) | 3 | todos ou guerreiros | +10 de defesa corpo a corpo; seguram a linha. |
 | 6 | Levantar escudos! (E) | 4 | todos ou guerreiros | +8 de defesa corpo a corpo e à distância para quem tem escudo; andam no máximo 1 hexágono. |
-| 7 | Arqueiros, disparem! (T) | 2 | arqueiros | Atiram no alvo que mais vale a flecha; sem alvo, andam até ter linha de tiro. |
+| 7 | Arqueiros, disparem! (T) | 2 | arqueiros | Atiram por cima da linha no alvo que mais vale a flecha e seguram o tiro quando o risco de acertar um aliado não compensa; sem alvo, andam até ter linha de tiro. |
 | 8 | Arqueiros, preparar disparo! (M) | 3 | arqueiros | Miram um turno sem atirar; depois, +15 de ataque no alvo mirado. Andar perde a mira. |
 | 9 | Atacar! (A) | 4 | todos ou uma divisão | Partem para cima; +10 no primeiro ataque de cada tropa durante a ordem. |
 
@@ -77,15 +77,15 @@ Os bônus são multiplicados pela potência de quem manda (1× para o Líder de 
 
 ### A IA
 
-Cada tropa pontua todas as opções do turno (ficar ou ir para cada hexágono alcançável, atacando ou não) pelo dano esperado, chance de matar, valor do alvo (líderes e arqueiros valem mais), risco de levar ataques e reações, coesão com o resto da linha e o quanto a opção cumpre a ordem recebida. Ordens limitam o que a tropa pode fazer: na linha defensiva ela anda no máximo 1 hexágono, no avanço devagar no máximo 2. O líder inimigo e o comandante interino escolhem ordens olhando distância, contato, força relativa e duelo de arqueiros. A IA antiga, que só atacava o mais próximo, continua no motor como régua: a nova precisa vencê-la dos dois lados do mapa, e os testes conferem isso.
+Cada tropa pontua todas as opções do turno (ficar ou ir para cada hexágono alcançável, atacando ou não) pelo dano esperado, chance de matar, valor do alvo (líderes e arqueiros valem mais), risco de levar ataques e reações, coesão com o resto da linha e o quanto a opção cumpre a ordem recebida. Arqueiros descontam o risco de a flecha errar e acertar um aliado em contato com o alvo, e seguram o tiro quando esse risco pesa mais que o tiro. Ordens limitam o que a tropa pode fazer: na linha defensiva ela anda no máximo 1 hexágono, no avanço devagar no máximo 2. O líder inimigo e o comandante interino escolhem ordens olhando distância, contato, força relativa e duelo de arqueiros. A IA antiga, que só atacava o mais próximo, continua no motor como régua: a nova precisa vencê-la dos dois lados do mapa, e os testes conferem isso.
 
 ### Aproximações deliberadas
 
 O sistema usa *Battle Brothers* como referência de gênero e regras, com implementação e arte próprias. Não é uma reprodução exata de todas as fórmulas ou exceções do jogo.
 
-O dano usa rolagens independentes para vida e armadura. A penetração sofre redução equivalente a 10% da proteção restante; quando a armadura quebra, aplica-se também a parcela desprotegida excedente. A linha de tiro usa um único raio entre centros, com bloqueio total por obstáculos e unidades. A moral é uma versão reduzida baseada em determinação, vizinhança e eventos. Tropas em fuga ainda usam a IA antiga, que só procura a borda.
+O dano usa rolagens independentes para vida e armadura. A penetração sofre redução equivalente a 10% da proteção restante; quando a armadura quebra, aplica-se também a parcela desprotegida excedente. A linha de tiro usa um único raio entre centros, bloqueado só por obstáculos. A moral é uma versão reduzida baseada em determinação, vizinhança e eventos. Tropas em fuga ainda usam a IA antiga, que só procura a borda.
 
-Ainda não há altura de terreno, cobertura parcial, dispersão de projéteis, ferimentos permanentes, troca de equipamento, habilidades, campanha, contratação, contratos, economia ou salvamento. O encontro e os equipamentos são fixos. A semente permite repetir o mesmo resultado ao repetir as mesmas ações.
+Ainda não há altura de terreno, cobertura parcial, dispersão de projéteis além da flecha perdida em aliados colados no alvo, ferimentos permanentes, troca de equipamento, habilidades, campanha, contratação, contratos, economia ou salvamento. O encontro e os equipamentos são fixos. A semente permite repetir o mesmo resultado ao repetir as mesmas ações.
 
 ## Organização
 

@@ -9,12 +9,12 @@
 import {
   aim, attack, commandedPlatoons, commanderOf, controllers, distance, divisionOf, endTurn, expectedDamage,
   getActive, hasShot, hitChance, isAlive, issueOrder, move, moveAp, ORDER_BONUS, orderInfo, performSimpleAiAction,
-  platoonOf, platoonTroops, previewAttack, reachable, tileAt,
+  platoonOf, platoonTroops, previewAttack, reachable, strayCandidates, strayChance, tileAt,
   type ActionResult, type BattleState, type Division, type Hex, type OrderId, type OrderTarget, type Team, type Unit,
 } from './game';
 
 /**
- * Weights found by tournaments against the prototype's AI (see src/ai.test.ts). Scores are in "percent of
+ * Weights found by tournaments against the prototype's AI (the last test in src/game.test.ts). Scores are in "percent of
  * a life": an expected wound of a quarter of the target's life is worth 25.
  */
 const WEIGHTS = {
@@ -34,6 +34,11 @@ const WEIGHTS = {
   weak: 0.7,
   /** Hexes to the enemy beyond which the slow advance still ends before the lines meet. */
   slowAdvance: 14,
+  /**
+   * A wound from our own arrow, relative to the same wound dealt to the enemy: it also shakes the line and the
+   * player's trust in their archers. 3 beat 0.5, 1.5, 2, 4 and 5 head to head, and keeps stray arrows rare.
+   */
+  friendlyFire: 3,
 };
 /** When set, every option the AI weighs is recorded with its score, for tuning and debugging. */
 export const AI_TRACE: { on: boolean; rows: Record<string, unknown>[] } = { on: false, rows: [] };
@@ -183,6 +188,24 @@ function strikeValue(s: BattleState, unit: Unit, target: Unit, chance: number): 
   return chance / 100 * (damage.hp / target.maxHp * 100 * worth + damage.armor * 0.12 + damage.kill * WEIGHTS.kill * worth);
 }
 
+/**
+ * Expected cost of a shot going astray: the chance it misses and comes down on a friend in contact with the
+ * target, times what that wound would cost the side. When it outweighs the shot, the archer holds fire.
+ */
+function friendlyFire(s: BattleState, unit: Unit, target: Unit, chance: number): number {
+  const friends = strayCandidates(s, unit, target);
+  if (!friends.length) return 0;
+  const stray = (1 - chance / 100) * strayChance(s, unit, target) / 100;
+  const loss = friends.reduce((sum, friend) => {
+    const damage = expectedDamage(unit.weapon, friend), worth = targetWorth(s, friend);
+    return sum + damage.hp / friend.maxHp * 100 * worth + damage.armor * 0.12 + damage.kill * WEIGHTS.kill * worth;
+  }, 0) / friends.length;
+  return stray * loss * WEIGHTS.friendlyFire;
+}
+/** A strike's value net of the risk to our own side. */
+const shotValue = (s: BattleState, unit: Unit, target: Unit, chance: number): number =>
+  strikeValue(s, unit, target, chance) - friendlyFire(s, unit, target, chance);
+
 /** Expected share of life lost next round if the unit ends its turn here. */
 function threatAt(ctx: Context): number {
   const { s, unit } = ctx;
@@ -224,7 +247,7 @@ function evaluate(ctx: Context, option: Option): Plan {
       // Orders that say "the nearest enemies" lean toward them; the AI still weighs who is worth hitting.
       const lean = profile === 'atacar' || profile === 'arqueiros-disparem' ? 2 : 0.5;
       for (const enemy of reachableTargets) {
-        const value = strikeValue(s, unit, enemy, hitChance(s, unit, enemy)) - (distance(enemy.pos, unit.pos) - closest) * lean;
+        const value = shotValue(s, unit, enemy, hitChance(s, unit, enemy)) - (distance(enemy.pos, unit.pos) - closest) * lean;
         if (value > attackValue) { attackValue = value; target = enemy; }
       }
       if (swings >= 2) attackValue *= WEIGHTS.secondSwing;
@@ -297,21 +320,28 @@ function compliance(ctx: Context, option: Option, here: number, hasTarget: boole
 function aimOrShoot(s: BattleState, unit: Unit): ActionResult | undefined {
   const order = unit.order!;
   const aimed = order.aimTargetId ? s.units.find(u => u.id === order.aimTargetId) : undefined;
+  let dropped: Unit | undefined;
   if (aimed && order.aimRound !== undefined) {
     if (order.aimRound === s.round) return endTurn(s);
-    if (hasShot(s, unit, aimed)) return previewAttack(s, unit, aimed).allowed ? attack(s, aimed.id) : endTurn(s);
+    if (hasShot(s, unit, aimed)) {
+      if (shotValue(s, unit, aimed, hitChance(s, unit, aimed)) > 0)
+        return previewAttack(s, unit, aimed).allowed ? attack(s, aimed.id) : endTurn(s);
+      // A friend now locked in melee with the aimed enemy makes the shot not worth it, and aiming again
+      // would not make it safer: pick someone else, or fall back to moving.
+      dropped = aimed;
+    }
   }
-  const shots = s.units.filter(u => isAlive(u) && u.team !== unit.team && hasShot(s, unit, u));
+  const shots = s.units.filter(u => isAlive(u) && u.team !== unit.team && u !== dropped && hasShot(s, unit, u));
   if (!shots.length) return undefined;
   const closest = nearest(unit.pos, shots);
-  let best: Unit | undefined, bestValue = -Infinity;
+  let best: Unit | undefined, bestValue = 0;
   for (const enemy of shots) {
     if (distance(enemy.pos, unit.pos) > closest + 1) continue;
     const chance = Math.min(95, hitChance(s, unit, enemy) + ORDER_BONUS.mira * order.potency);
-    const value = strikeValue(s, unit, enemy, chance);
+    const value = shotValue(s, unit, enemy, chance);
     if (value > bestValue) { bestValue = value; best = enemy; }
   }
-  return aim(s, best!.id);
+  return best ? aim(s, best.id) : undefined;
 }
 
 // Commanders -----------------------------------------------------------------

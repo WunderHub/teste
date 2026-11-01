@@ -196,7 +196,7 @@ describe('attacks, armor and line of sight', () => {
     expect(previewAttack(state, ally, enemy).chance).toBe(normal + 20);
   });
 
-  it('blocks shots through obstacles and units, beyond range, or during melee engagement', () => {
+  it('arrows fly over combatants but not through obstacles, beyond range, or during melee engagement', () => {
     const { state, ally, enemy } = duel(1, true);
     enemy.pos = { q: 8, r: 4 };
     expect(previewAttack(state, ally, enemy).allowed).toBe(true);
@@ -204,14 +204,72 @@ describe('attacks, armor and line of sight', () => {
     obstruction.obstacle = 'ruin';
     expect(previewAttack(state, ally, enemy).reason).toMatch(/Linha de tiro/);
     delete obstruction.obstacle;
-    const cover: Unit = { ...ally, id: 'cover', pos: { q: 6, r: 4 } };
-    state.units.push(cover);
-    expect(previewAttack(state, ally, enemy).allowed).toBe(false);
-    state.units.pop();
+    state.units.push({ ...ally, id: 'between', pos: { q: 6, r: 4 } }, { ...enemy, id: 'in-front', pos: { q: 7, r: 4 } });
+    expect(previewAttack(state, ally, enemy)).toMatchObject({ allowed: true, friendlyRisk: 0 });
+    state.units.splice(2);
     enemy.pos = { q: 12, r: 4 };
     expect(previewAttack(state, ally, enemy).reason).toMatch(/alcance/);
     enemy.pos = { q: 5, r: 4 };
     expect(previewAttack(state, ally, enemy).reason).toMatch(/Engajado/);
+  });
+
+  /** Friends of the shooter placed in contact with the target, on free hexes around it. */
+  const contact = (state: BattleState, shooter: Unit, target: Unit, count: number): Unit[] => {
+    const free = neighbors(target.pos).filter(h => tileAt(state, h) && !tileAt(state, h)!.obstacle
+      && !state.units.some(u => key(u.pos) === key(h)));
+    const friends = free.slice(0, count).map((pos, i): Unit => ({ ...shooter, id: `friend-${i}`, name: `Amigo ${i}`,
+      weapon: { ...shooter.weapon }, pos }));
+    state.units.push(...friends);
+    return friends;
+  };
+
+  it('a missed arrow can strike a friend in contact with the target: 35% per friend, up to 70%', () => {
+    const { state, ally, enemy } = duel(1, true);
+    enemy.pos = { q: 8, r: 4 };
+    ally.rangedSkill = -1000;
+    expect(previewAttack(state, ally, enemy)).toMatchObject({ chance: 5, friendlyRisk: 0 });
+    contact(state, ally, enemy, 1);
+    expect(previewAttack(state, ally, enemy).friendlyRisk).toBe(33);
+    contact(state, ally, enemy, 2);
+    expect(previewAttack(state, ally, enemy).friendlyRisk).toBe(67);
+  });
+
+  it('only friends in contact take stray arrows, and only after a miss', () => {
+    const { state, ally, enemy } = duel(17431, true);
+    enemy.pos = { q: 8, r: 4 };
+    ally.rangedSkill = -1000;
+    const friends = contact(state, ally, enemy, 2);
+    for (const u of [enemy, ...friends]) { u.hp = u.maxHp = 100000; u.resolve = 1000; }
+    let strays = 0, clean = 0;
+    for (let shot = 0; shot < 60; shot++) {
+      setActive(state, ally);
+      ally.ap = ally.maxAp; ally.fatigue = 0;
+      const before = friends.map(f => f.hp + f.headArmor + f.bodyArmor);
+      const events = attack(state, enemy.id).events.filter(e => e.type === 'attack');
+      const stray = events.filter(e => e.stray);
+      if (events[0].hit) { expect(stray).toHaveLength(0); continue; }
+      if (stray.length) strays++; else clean++;
+      expect(stray.length).toBeLessThanOrEqual(1);
+      for (const e of stray) {
+        expect(e).toMatchObject({ unitId: ally.id, hit: true, from: enemy.pos });
+        expect(friends.map(f => f.id)).toContain(e.targetId);
+      }
+      friends.forEach((f, i) => {
+        expect(f.hp + f.headArmor + f.bodyArmor < before[i]).toBe(stray.some(e => e.targetId === f.id));
+      });
+    }
+    // 70% of misses go astray here: both outcomes show up over sixty shots.
+    expect(strays).toBeGreaterThan(20);
+    expect(clean).toBeGreaterThan(5);
+  });
+
+  it('melee blows never go astray', () => {
+    const { state, ally, enemy } = duel(1);
+    enemy.pos = { q: 5, r: 4 };
+    ally.meleeSkill = -1000;
+    contact(state, ally, enemy, 2);
+    expect(previewAttack(state, ally, enemy).friendlyRisk).toBe(0);
+    expect(attack(state, enemy.id).events.some(e => e.stray)).toBe(false);
   });
 
   it('supports optional ammunition without imposing it on the prototype loadouts', () => {
@@ -637,6 +695,25 @@ describe('the troop AI follows orders', () => {
     expect(events.some(e => e.type === 'attack' && e.unitId === archer.id)).toBe(true);
   });
 
+  it.each([
+    ['holds fire when a miss would likely hit friends fighting the target', -1000, 2, false],
+    ['still shoots when the risk to a friend in contact is small', 1000, 1, true],
+  ] as const)('an archer told to shoot %s', (_, skill, friends, shoots) => {
+    const { state } = field('arqueiros-disparem');
+    const archer = state.units.find(u => u.id === 'aliado-arco-1')!;
+    const enemy = state.units.find(u => u.id === 'inimigo-2')!;
+    enemy.pos = { q: archer.pos.q, r: archer.pos.r - 4 };
+    archer.rangedSkill = skill;
+    const free = neighbors(enemy.pos).filter(h => tileAt(state, h) && !tileAt(state, h)!.obstacle
+      && !state.units.some(u => key(u.pos) === key(h)));
+    state.units.filter(u => u.team === 'ally' && u.role === 'troop' && u.weapon.kind === 'melee').slice(0, friends)
+      .forEach((u, i) => { u.pos = free[i]; });
+    expect(previewAttack(state, archer, enemy).allowed).toBe(true);
+    const events = aiTurn(state, archer);
+    expect(events.some(e => e.type === 'attack' && e.unitId === archer.id && e.targetId === enemy.id)).toBe(shoots);
+    expect(events.some(e => e.stray)).toBe(false);
+  });
+
   it('the AI leader gives orders before the troops move', () => {
     const state = createBattle(1, 'campo-aberto');
     const leader = getActive(state)!;
@@ -653,7 +730,7 @@ describe('the troop AI follows orders', () => {
       return state.outcome === (newSide === 'ally' ? 'victory' : 'defeat');
     };
     const seeds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-    // Today the new AI wins 19 of these 20; the bar leaves room for tuning without letting it slip back.
+    // Today the new AI wins 17 of these 20; the bar leaves room for tuning without letting it slip back.
     expect(seeds.filter(seed => play(seed, 'ally')).length).toBeGreaterThanOrEqual(7);
     expect(seeds.filter(seed => play(seed, 'enemy')).length).toBeGreaterThanOrEqual(7);
   }, 120000);

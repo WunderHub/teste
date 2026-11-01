@@ -40,6 +40,7 @@ export interface UIView {
     reason: string;
     ap: number;
     fatigue: number;
+    friendlyRisk: number;
   };
 }
 
@@ -178,7 +179,7 @@ export class CombatUI {
           <p class="eyebrow">CADERNO DA FACÇÃO</p><h2 id="help-title">Quem comanda é o líder.</h2>
           <p class="modal-lead">Você controla só os líderes, marcados com um estandarte. As tropas do pelotão cumprem as ordens do líder: sem ordem, seguram a posição. O Líder Supremo fica fora das batalhas; se ele cair, a campanha acaba.</p>
           <div class="help-controls"><div><kbd>1</kbd><span><strong>Mover</strong>Clique num hexágono alcançável. O caminho mostra o custo antes de confirmar.</span></div><div><kbd>2</kbd><span><strong>Atacar</strong>Clique num inimigo. Confira alcance, chance de acerto e custos.</span></div><div><kbd>W</kbd><span><strong>Aguardar</strong>Adie sua vez para o fim da fila, uma vez por rodada.</span></div><div><kbd>ESPAÇO</kbd><span><strong>Encerrar turno</strong>Finalize a ativação da unidade atual.</span></div><div><kbd>3–9</kbd><span><strong>Dar uma ordem</strong>Na aba de comando. Custa PL, não PA, e vale por ${ORDER_ROUNDS} rodadas, que são também a recarga.</span></div><div><kbd>T</kbd><span><strong>Para quem</strong>Todos, só guerreiros ou só arqueiros. Só ouve quem está no alcance de comando.</span></div></div>
-          <div class="help-notes"><p><span class="help-morale" aria-hidden="true">✥</span><span>Arraste o campo para mover a câmera, use a roda do mouse ou as setas para navegar e <kbd>C</kbd> para centralizar em quem está agindo. <kbd>V</kbd> muda a velocidade das tropas.</span></p><p>${icon('fatigue')} Ações gastam PA e acumulam fadiga. Na primeira ativação de cada rodada, 15 de fadiga são removidos automaticamente.</p><p>${icon('sword')} Sair de um hexágono ameaçado pode provocar um ataque. Arcos não disparam quando o arqueiro está engajado.</p><p>${icon('shield')} Cabeça e corpo têm armaduras separadas. Obstáculos e combatentes bloqueiam a linha de tiro.</p><p><span class="help-morale" aria-hidden="true">◆</span> Perdas e ferimentos afetam a moral. Unidades em fuga procuram uma saída.</p><p><span class="help-morale" aria-hidden="true">✧</span> A letra no ombro de uma tropa mostra a ordem que ela segue. Fora do alcance quando a ordem vence, ela continua cumprindo, mas sem o bônus. Se o líder cair e não houver outro, a tropa de maior nota assume e a batalha segue sozinha.</p></div>
+          <div class="help-notes"><p><span class="help-morale" aria-hidden="true">✥</span><span>Arraste o campo para mover a câmera, use a roda do mouse ou as setas para navegar e <kbd>C</kbd> para centralizar em quem está agindo. <kbd>V</kbd> muda a velocidade das tropas.</span></p><p>${icon('fatigue')} Ações gastam PA e acumulam fadiga. Na primeira ativação de cada rodada, 15 de fadiga são removidos automaticamente.</p><p>${icon('sword')} Sair de um hexágono ameaçado pode provocar um ataque. Arcos não disparam quando o arqueiro está engajado.</p><p>${icon('shield')} Cabeça e corpo têm armaduras separadas. Flechas passam por cima de quem está no caminho; só obstáculos bloqueiam. Se errar, a flecha pode acertar um aliado em contato com o alvo.</p><p><span class="help-morale" aria-hidden="true">◆</span> Perdas e ferimentos afetam a moral. Unidades em fuga procuram uma saída.</p><p><span class="help-morale" aria-hidden="true">✧</span> A letra no ombro de uma tropa mostra a ordem que ela segue. Fora do alcance quando a ordem vence, ela continua cumprindo, mas sem o bônus. Se o líder cair e não houver outro, a tropa de maior nota assume e a batalha segue sozinha.</p></div>
           <div class="modal-footer"><span><kbd>G</kbd> mostrar grade <span class="footer-separator">·</span> <kbd>ESC</kbd> pausar</span><button class="primary-button" data-action="close-help">Voltar ao combate <span aria-hidden="true">→</span></button></div>
         </section>
       </div>
@@ -414,9 +415,12 @@ export class CombatUI {
     this.node('preview').hidden = !view.preview || unit.team === 'ally';
     if (view.preview && unit.team === 'enemy') {
       this.text('preview-chance', `${Math.round(view.preview.chance)}%`);
-      this.text('preview-reason', view.preview.reason || (view.preview.allowed ? 'Alvo ao alcance.' : 'Este ataque não está disponível.'));
+      const risk = view.preview.allowed && view.preview.friendlyRisk > 0;
+      this.text('preview-reason', view.preview.reason || (risk ? `Se errar, a flecha pode acertar um aliado colado no alvo: ${view.preview.friendlyRisk}% de risco.`
+        : view.preview.allowed ? 'Alvo ao alcance.' : 'Este ataque não está disponível.'));
       this.text('preview-cost', `${view.preview.ap} PA · +${view.preview.fatigue} fadiga`);
       this.node('preview').classList.toggle('is-blocked', !view.preview.allowed);
+      this.node('preview').classList.toggle('is-risky', risk);
     }
   }
 

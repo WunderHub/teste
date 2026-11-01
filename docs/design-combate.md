@@ -170,7 +170,7 @@ O efeito de cada ordem foi decidido pelo chefe. Os números são proposta.
 | Avanço rápido! | Chegar o mais perto possível do inimigo mais próximo do pelotão e atacar se alcançar. | Parar no meio do caminho com PA sobrando. | Anda o que der. |
 | Formar linha defensiva! | Ocupar uma vaga na linha virada para o inimigo e atacar quem chegar ao lado. | Avançar além da linha ou perseguir. | Tapa o buraco mais próximo da linha. |
 | Levantar escudos! | Ficar no lugar e atacar só quem estiver colado. | Andar mais de 1 hex. | Fica parada. |
-| Arqueiros, disparem! | Atirar no inimigo mais próximo com linha de tiro livre. Se ninguém estiver no alcance, andar até ter alguém. | Ficar colada num inimigo corpo a corpo. | Se estiver engajada, recua 1 hex quando isso não der ataque grátis ao inimigo. |
+| Arqueiros, disparem! | Atirar no inimigo que mais vale a flecha ao alcance, por cima de quem estiver no caminho. Se ninguém estiver no alcance, andar até ter alguém. Segura o tiro quando um aliado está em contato com o alvo e o risco de acertá-lo pesa mais que o tiro. | Ficar colada num inimigo corpo a corpo. | Se estiver engajada, recua 1 hex quando isso não der ataque grátis ao inimigo. |
 | Arqueiros, preparar disparo! | 1º turno: mira sem atirar. 2º e 3º turnos: atira com o bônus. | Andar, porque andar perde a mira. | Se o alvo sumir, mira no novo inimigo mais próximo. |
 | Atacar! | Atacar o inimigo mais próximo. Guerreiros andam até ele. | Trocar de alvo sem motivo. | Anda em direção ao inimigo mais próximo. |
 
@@ -188,6 +188,7 @@ O efeito de cada ordem foi decidido pelo chefe. Os números são proposta.
 - **Atacar!**: o bônus vale no primeiro ataque que a tropa faz por vontade própria durante a ordem. Ataques de reação (zona de controle) não usam nem gastam o bônus.
 - **Preparar disparo**: mirar gasta o turno inteiro. Nos turnos seguintes, todos os tiros no alvo mirado ganham o bônus (até 2 por turno, por causa dos PA). Andar perde a mira. Se o alvo cair, fugir ou sair da linha de tiro, o arqueiro mira em outro.
 - **Quem dá ordens**: o líder do pelotão ou, sem nenhum líder vivo no lado, o comandante interino. O líder em fuga não dá ordens até recobrar a coragem.
+- **Tiro por cima e flecha perdida** (decidido pelo chefe): flechas passam por cima de quem estiver no caminho, aliado ou inimigo; só obstáculos bloqueiam a linha de tiro. Se a flecha errar e houver aliados do atirador em contato com o alvo, ela pode acertar um deles: 35% por aliado em contato, no máximo 70%, sorteando qual. Corpo a corpo nunca se perde assim. A ficha do alvo e a dica do mouse mostram a chance de acertar um aliado; a IA pesa esse risco e pode decidir não atirar.
 - **Sem pelotão**: combatentes sem pelotão (só existem no encontro antigo de 3 contra 4, usado nos testes) lutam por conta própria, avançando e atacando.
 
 ## 7. Morte do líder e sucessão
@@ -286,7 +287,7 @@ Na sua vez, a tropa lista as ações possíveis (andar para cada hex alcançáve
 `nota = obediência × cumprimento da ordem + valor tático + autopreservação + coesão`
 
 - **Cumprimento da ordem**: quanto a ação realiza o que a ordem pede, conforme a tabela da seção 6. Cada ordem é um perfil de pesos, então criar uma ordem nova é só criar um perfil novo.
-- **Valor tático**: chance de acerto, dano esperado em vida e armadura, chance de matar, perigo do alvo (arqueiro solto, líder inimigo) e bônus por cercar.
+- **Valor tático**: chance de acerto, dano esperado em vida e armadura, chance de matar, perigo do alvo (arqueiro solto, líder inimigo) e bônus por cercar. No tiro, desconta o dano esperado da flecha perdida em aliados colados no alvo, pesado 1,5×; se o tiro fica negativo, o arqueiro não atira.
 - **Autopreservação**: evitar ataques grátis da zona de controle, evitar ficar cercada, olhar a fadiga e a moral.
 - **Coesão**: ficar perto da vaga que o pelotão reservou para ela na formação.
 - **Obediência**: vem da moral e dos traços. Uma tropa abalada pode hesitar num "Avanço rápido!". Uma tropa em fuga ignora ordens, como já acontece no protótipo.
@@ -395,3 +396,4 @@ Cada pergunta já tem uma proposta. Se o chefe não mudar, a proposta vale.
 - **0.1 (2026-11-01)**: primeira versão, a partir das conversas com o chefe no projeto.
 - **0.2 (2026-11-01)**: fase 1 implementada.
 - **0.3 (2026-11-01)**: o Líder Supremo fica fora das batalhas e a morte dele encerra a campanha (decisão do chefe). Meta de IA melhor que a de *Battle Brothers*, com a lista de habilidades e a régua de aprovação. Fase 2 implementada.
+- **0.4 (2026-11-01)**: arqueiros atiram por cima da linha; flecha que erra pode acertar aliado em contato com o alvo, e a IA segura o tiro quando não compensa (pedido do chefe).

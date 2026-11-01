@@ -373,6 +373,7 @@ export class CombatScene extends Phaser.Scene {
     if (active && hit.unit && active.team !== hit.unit.team && this.playerCanAct()) {
       this.view.preview = previewAttack(this.state, active, hit.unit);
       tip = this.view.preview.allowed ? `${hit.unit.name} · ${this.view.preview.chance}% de acerto\n${this.view.preview.ap} PA · +${this.view.preview.fatigue} fadiga` : this.view.preview.reason;
+      if (this.view.preview.allowed && this.view.preview.friendlyRisk > 0) tip += `\nRisco de acertar aliado: ${this.view.preview.friendlyRisk}%`;
     } else if (hit.hex && !hit.unit && this.playerCanAct()) {
       const tile = tileAt(this.state, hit.hex), path = this.pathMap.get(key(hit.hex));
       if (tile?.obstacle) tip = 'Obstáculo · bloqueia passagem e visão';
@@ -488,14 +489,21 @@ export class CombatScene extends Phaser.Scene {
       if (!this.onScreen(attacker.pos, 120) && !this.onScreen(target.pos, 120)) return;
       const a = { x: pawn.image.x, y: pawn.image.y - 7 }, b = { x: targetPawn.image.x, y: targetPawn.image.y - 7 };
       if (attacker.weapon.kind === 'ranged') {
-        const arrow = this.add.rectangle(a.x, a.y - 38, 19, 2, COLORS.bone).setRotation(Math.atan2(b.y - a.y, b.x - a.x)).setDepth(1400);
+        // A stray arrow glances off the enemy it missed and drops onto the friend beside it.
+        const start = event.stray && event.from ? hexToWorld(event.from) : a;
+        const arrow = this.add.rectangle(start.x, start.y - 38, 19, 2, event.stray ? 0xe0b46a : COLORS.bone).setRotation(Math.atan2(b.y - start.y, b.x - start.x)).setDepth(1400);
         this.transient.add(arrow);
-        await new Promise<void>(resolve => this.tweens.add({ targets: arrow, x: b.x, y: b.y - 38, duration: 210, onComplete: () => { arrow.destroy(); this.transient.delete(arrow); resolve(); } }));
+        await new Promise<void>(resolve => this.tweens.add({ targets: arrow, x: b.x, y: b.y - 38, duration: event.stray ? 160 : 210, onComplete: () => { arrow.destroy(); this.transient.delete(arrow); resolve(); } }));
       } else await new Promise<void>(resolve => this.tweens.add({ targets: pawn.image, x: a.x + (b.x - a.x) * 0.25, y: a.y + 7 + (b.y - a.y) * 0.15, duration: 95, yoyo: true, onComplete: () => resolve() }));
       if (event.hit) { targetPawn.image.setTint(0xe39d89); this.time.delayedCall(130, () => targetPawn.image.clearTint()); }
       const text = this.add.text(b.x, b.y - 100, event.hit ? event.damage ? `−${event.damage}` : 'ARMADURA' : 'ERROU', { fontFamily: 'Arial', fontSize: event.damage ? '25px' : '15px', fontStyle: 'bold', color: event.hit ? '#edaa93' : '#d7d7c5', stroke: '#1a2119', strokeThickness: 4 }).setOrigin(0.5).setDepth(1600);
       this.transient.add(text);
       this.tweens.add({ targets: text, y: b.y - 137, alpha: 0, duration: 1050, delay: 170, onComplete: () => { text.destroy(); this.transient.delete(text); } });
+      if (event.stray) {
+        const tag = this.add.text(b.x, b.y - 124, 'FLECHA PERDIDA', { fontFamily: 'Arial', fontSize: '13px', fontStyle: 'bold', color: '#e0b46a', stroke: '#1a2119', strokeThickness: 4 }).setOrigin(0.5).setDepth(1600);
+        this.transient.add(tag);
+        this.tweens.add({ targets: tag, y: b.y - 161, alpha: 0, duration: 1050, delay: 420, onComplete: () => { tag.destroy(); this.transient.delete(tag); } });
+      }
     }
   }
   /** A leader calls an order: the words rise over the leader and a ring sweeps out to the command range. */
