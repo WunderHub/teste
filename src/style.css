@@ -344,6 +344,11 @@ kbd { font: 9px var(--sans); border: 1px solid #9aa48b42; min-width: 15px; heigh
   .division-status .command-range { display: none; }
 }
 
+/* Short windows, like the game inside a browser tab on a laptop: the orders stay, the detail lines go. */
+@media (max-height: 680px) {
+  .order-detail, .division-status { display: none; }
+}
+
 @media (max-height: 720px) {
   .battle-heading { top: 15px; }
   .battle-objective { top: 68px; }
