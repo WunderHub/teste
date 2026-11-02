@@ -4,6 +4,10 @@ Protótipo original de combate tático em hexágonos, feito com **Phaser 3 + Typ
 
 O design completo do combate (líderes, pelotões, ordens e turnos em grupo) está em [`docs/design-combate.md`](docs/design-combate.md). Esta versão implementa as fases 1 e 2 dele.
 
+## Próxima direção visual e de terreno
+
+As decisões aprovadas sobre corpo inteiro **sem base**, aparência modular, expressões, oclusão e geração de terreno baseada no mapa global estão em [docs/direcao-visual-terreno.md](docs/direcao-visual-terreno.md), com referências visuais. Essa especificação descreve a próxima etapa; não altera as funcionalidades atuais descritas abaixo.
+
 ## Executar no navegador
 
 Requer Node.js 22 ou superior.
