@@ -12,6 +12,12 @@ Este documento registra as decisões do usuário posteriores ao protótipo. É u
 - Fixar tamanho, proporções, pose e encaixes; variar aparência, não dimensões corporais. Escala final e perspectiva no jogo ainda precisam ser validadas.
 - Direção original, pintada e detalhada, conforme as referências; não copiar sprites de Battle Brothers.
 
+### Identificação das facções
+
+- Os combatentes são identificados pelas **cores da facção na roupa, na armadura e no escudo**. Não usar base, anel no chão, contorno ou plataforma colorida para isso.
+- As cores precisam ser legíveis em zoom afastado, com 20 tropas e um líder por lado, e distinguíveis entre si sobre os solos aprovados.
+- **Em aberto**: a paleta de cada facção, quanto da peça leva a cor (faixa, túnica, tinta no escudo), como o líder se destaca das tropas da mesma facção, e como identificar os lados enquanto o kit corporal ainda não tem roupas e armaduras. Proposta para testes: o calção de linho do corpo-base pode levar a cor da facção até os equipamentos existirem.
+
 ### Variação modular futura
 
 Combinar identidades de rosto, tonalidades de pele, cabelos, barbas e tatuagens, mantendo os mesmos encaixes. Variações de torso poderão respeitar o mesmo volume e proporções. Não produzir agora roupas, armaduras ou armas como parte deste kit corporal.
@@ -66,7 +72,20 @@ A regra vale tanto para subida quanto para descida. Ocupação, obstáculos, pon
 
 Diferenças maiores que 1 podem existir no mapa: representam bordas intransponíveis diretamente para humanos. Procurar rota alternativa. Não achatar todas as escarpas para satisfazer a regra de movimento.
 
-Ainda não estão definidos custos adicionais de subida/descida, vantagem de combate por altura, queda, alcance ou visibilidade entre níveis. Não inventar esses efeitos ao implementar o relevo.
+Ainda não estão definidos custos adicionais de subida/descida, queda, alcance ou visibilidade entre níveis. Não inventar esses efeitos ao implementar o relevo. A vantagem de combate por altura está decidida na seção abaixo.
+
+### Vantagem de altura em combate (decidida)
+
+- Quem ataca **de cima** ganha bônus, tanto **corpo a corpo** quanto **à distância**.
+- Quem ataca **de baixo** sofre penalidade, tanto **corpo a corpo** quanto **à distância**.
+- **Em aberto**: o tamanho do bônus e da penalidade; se crescem com a diferença de altura ou são fixos; se existe ataque corpo a corpo entre vizinhos com diferença maior que 1 (que a regra de movimento já bloqueia); e como a altura entra na linha de tiro. Definir antes de implementar, junto com o balanceamento.
+- A ordem "Procurar terreno elevado", já entendida pelo leitor de ordens ([design-combate.md, seção 6](design-combate.md#6-ordens-gritadas)), depende desta regra. Enquanto o campo for plano, o jogo avisa e devolve o PL.
+
+### Distância para a IA (decidida)
+
+- A IA mede a distância pelo **caminho que dá para andar**, e não em linha reta, para tomar a melhor decisão. O caminho respeita a regra humana de altura, os obstáculos e os combatentes no meio.
+- Exemplo: um inimigo a 3 hexágonos em linha reta, mas no alto de uma escarpa, pode estar a 9 passos pelo caminho. A IA deve tratá-lo como distante para quem anda até ele.
+- **Proposta**: alcance de arma e alcance de comando continuam contados em hexágonos, em linha reta. O que muda é a distância de deslocamento que a IA usa para escolher alvos, avançar, recuar e decidir as ordens do líder. O mapa de distância por pelotão, calculado uma vez por rodada (design-combate.md, seção 9), serve para isso sem pesar no desempenho.
 
 ### Sequência recomendada do gerador
 
@@ -96,4 +115,4 @@ Produzir e aprovar assets separados antes de substituir a arte do jogo. Validar 
 
 Verificar: alturas inteiras e limites, repetibilidade por semente, áreas contínuas, pouca variação em planícies, mistura floresta/montanha, regras de subida e descida (inclusive alturas negativas), rotas alternativas, posições iniciais livres e acessíveis, pés centralizados e sem flutuação, visibilidade em zoom e com 20 tropas mais um líder por lado.
 
-Esta entrega documental não implementa o gerador, expressões, novos personagens ou elevações no motor, e não publica uma nova versão do jogo ou do ambiente.
+Esta entrega documental não implementa o gerador, expressões, novos personagens, cores de facção, elevações, vantagem de altura ou distância por caminho na IA, e não publica uma nova versão do jogo ou do ambiente.
