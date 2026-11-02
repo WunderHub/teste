@@ -1,8 +1,8 @@
 # Design de combate: líderes, pelotões e ordens
 
-Documento vivo do combate de *Vale do Sal*. Versão 0.3, de 1º de novembro de 2026.
+Documento vivo do combate de *Vale do Sal*. Versão 0.5, de 2 de novembro de 2026.
 
-Ele registra o que o chefe (Kauê) já decidiu e propõe como preencher o que ainda falta. **As fases 1 e 2 estão implementadas** (veja a [seção 11](#11-ponte-com-o-protótipo-atual)): líderes, subclasses, pelotões, nota de atributo, mapa maior com câmera, batalha de teste de 20 contra 20, aba de comando com as sete ordens, IA de tropa seguindo ordens, IA de ordens do líder inimigo e comandante interino.
+Ele registra o que o chefe (Kauê) já decidiu e propõe como preencher o que ainda falta. **As fases 1 e 2 estão implementadas** (veja a [seção 11](#11-ponte-com-o-protótipo-atual)): líderes, subclasses, pelotões, nota de atributo, mapa maior com câmera, batalha de teste de 20 contra 20, ordens gritadas (o player escreve a ordem e o jogo lê), IA de tropa seguindo ordens, IA de ordens do líder inimigo e comandante interino.
 
 ## Como ler este documento
 
@@ -20,7 +20,7 @@ Todo número marcado como proposta serve só para começar a testar. O balanceam
 - O Líder Supremo **normalmente fica fora das batalhas**: se ele morrer, a campanha acaba. O player manda os outros líderes, e o Supremo só entra em campo como **último recurso**.
 - Em combate, o player controla **só os líderes**. As **tropas** agem por IA e seguem as **ordens** do líder do seu **pelotão**.
 - A conta ideal é **1 líder para cada 20 tropas**. Tropa demais deixa o líder **Sobrecarregado**. Líder sobrando coloca as tropas sob **Pressão de liderança**.
-- As ordens saem da **aba de comando**, custam **PL** (pontos de liderança), valem por **3 turnos** e só chegam a quem está no **alcance**.
+- O líder **grita as ordens**: o player escolhe o grupo e escreve a ordem numa caixa de texto, e o jogo lê o que ele escreveu. As ordens custam **PL** (pontos de liderança), só chegam a quem está no **alcance** e valem até serem trocadas. Elas só dão bônus depois de **assentar** por um turno inteiro; trocar antes disso causa **estresse** nas tropas.
 - Fora de combate, o pelotão age **todo de uma vez**. Quando alguém do grupo ataca ou é atacado, o grupo passa a agir **um por um, por iniciativa**.
 - Até **100 tropas por lado**. O inimigo segue as mesmas regras, com líderes dele.
 - A meta da IA é ser **melhor que a de *Battle Brothers***, medida por testes automáticos (veja a [seção 10](#10-ia)).
@@ -45,10 +45,12 @@ Todo número marcado como proposta serve só para começar a testar. O balanceam
 | Tropa | Combatente comum, controlado pela IA. Tem atributos e traços. |
 | Pelotão | Um líder e as tropas atribuídas a ele. |
 | Guerreiros e arqueiros | As duas divisões do pelotão para receber ordens. Arqueiros são as tropas com arco ou besta. Guerreiros são o resto. |
-| Ordem | Comando dado pela aba de comando. Vale por 3 turnos. |
+| Ordem | Comando que o líder grita: o player escolhe o grupo e escreve a ordem. Vale até ser trocada. |
 | PL (pontos de liderança) | Recurso que paga as ordens, do mesmo jeito que os PA pagam movimento e ataque. |
 | Alcance de comando | Distância máxima, em hexágonos, entre o líder e a tropa para a ordem chegar. |
-| Recarga | Os 3 turnos em que não dá para dar uma ordem nova. |
+| Assentar | A ordem assenta quando passa um turno inteiro sem ser trocada. Só a ordem assentada dá bônus. |
+| Ordem repentina | Ordem nova que troca outra que ainda não assentou. |
+| Estresse | Debuff de quem recebe uma ordem repentina: menos ataque e menos defesa. Dura 1 turno. |
 | Sobrecarregado | Status do líder com mais de 20 tropas. |
 | Pressão de liderança | Status das tropas quando há líderes sobrando. |
 | Nota de atributo | Soma de todos os atributos de um combatente. |
@@ -137,59 +139,119 @@ Todo número marcado como proposta serve só para começar a testar. O balanceam
   - Pressão: só no posicionamento, em transferências e quando um líder cai. Assim, perder tropas no meio da luta não castiga o lado duas vezes.
 - **Transferência em batalha**: custa 3 PL do líder que recebe e pode levar várias tropas de uma vez, desde que estejam no alcance de comando dele. Só as tropas transferidas sentem a queda de moral: cada uma faz um teste de moral leve (+20 na chance de resistir) e, se falhar, cai um nível. A tropa transferida continua cumprindo a ordem que já tinha até o novo líder dar outra.
 
-## 6. Aba de comando e ordens
+## 6. Ordens gritadas
 
 **Decidido**
 
-- Cada líder tem uma aba de comando com ordens.
-- A ordem pode ir para os guerreiros, para os arqueiros ou para todos do pelotão.
-- As tropas seguem a última ordem por 3 turnos.
-- Não dá para dar ordem nova antes dos 3 turnos acabarem. Esse tempo é a recarga.
-- Ordens consomem PL, como se fossem PA.
-- A ordem tem alcance limitado. Se uma tropa estiver fora do alcance, ela continua tentando cumprir a última ordem que recebeu do seu líder de pelotão.
+- No turno do líder do player, o botão **Dar ordens** abre primeiro a escolha de **para quem** vai a ordem: guerreiros, arqueiros ou todos. Depois abre uma **caixa de texto** em que o player escreve a ordem, como se o líder estivesse gritando no meio da batalha. Exemplo do chefe: escolher os arqueiros e escrever "Arqueiros, preparar disparo!".
+- Quem lê a ordem é um **leitor próprio do jogo**, sem serviço externo. Ele entende **vários tipos de ordem**, com sinônimos e jeitos diferentes de dizer a mesma coisa.
+- Se o jogo **não entender** a ordem, seja por ela ser complexa demais, seja por estar escrita errado, ele **avisa e devolve o PL**.
+- Ordens consomem **PL**, como se fossem PA.
+- Não há recarga fixa: o líder pode dar ordens em sequência, e as tropas seguem a ordem até ela ser trocada.
+- A ordem precisa **assentar**: passar **um turno inteiro sem ser substituída**. Só a ordem assentada dá bônus de atributo.
+- Trocar uma ordem antes de ela assentar é uma **ordem repentina**. Ela causa **estresse** nas tropas, e a ordem trocada não chega a dar o bônus. No exemplo do chefe, "Arqueiros, preparar disparo!" num turno e "Arqueiros, procurem terreno elevado!" no turno seguinte estressa os arqueiros, e eles não ganham o bônus de longo alcance, porque não ficaram nem 2 turnos na posição, mirando.
+- O **estresse** é um debuff na **precisão e na defesa**: fica mais difícil acertar e desviar. Quanto mais estresse, mais forte o debuff. Ele dura **1 turno**.
+- A ordem tem alcance limitado. A tropa fora do alcance não ouve a ordem nova e continua cumprindo a última ordem que recebeu do seu líder de pelotão.
 
 ### Lista de ordens
 
-O efeito de cada ordem foi decidido pelo chefe. Os números são proposta.
+As sete primeiras vieram do chefe. As seis últimas são proposta, para o leitor entender os gritos mais comuns de uma batalha. Os números são proposta. A **marca** é a letra que aparece no ombro da tropa que segue a ordem.
 
-| Ordem | Para quem | Efeito | Números propostos | PL |
-| --- | --- | --- | --- | ---: |
-| Avanço devagar! | todos, guerreiros ou arqueiros | Avançam com cuidado. | Andam no máximo 2 hex por turno, mantendo a formação e guardando PA para atacar. | 2 |
-| Avanço rápido! | todos, guerreiros ou arqueiros | Avançam depressa. | Gastam os PA para fechar a distância. A formação fica solta. | 3 |
-| Formar linha defensiva! | todos ou guerreiros | Aumenta a defesa só corpo a corpo. | +10 de defesa corpo a corpo. As tropas formam uma linha contínua e não saem dela. | 3 |
-| Levantar escudos! | todos ou guerreiros | Aumenta a defesa corpo a corpo e à distância. | +8 de defesa corpo a corpo e +8 à distância. | 4 |
-| Arqueiros, disparem! | arqueiros | Arcos e bestas atiram nos inimigos mais próximos. | Sem bônus. | 2 |
-| Arqueiros, preparar disparo! | arqueiros | Passam o turno mirando no inimigo mais próximo e ganham pontos na habilidade à distância. | +15 de ataque à distância no tiro mirado. | 3 |
-| Atacar! | todos, guerreiros ou arqueiros | Atacam os inimigos mais próximos, com bônus no primeiro ataque. | +10 de ataque (corpo a corpo ou à distância) no primeiro ataque de cada tropa durante a ordem. | 4 |
+| Ordem | Marca | Para quem | Efeito | Números propostos | PL |
+| --- | :---: | --- | --- | --- | ---: |
+| Avanço devagar | D | todos, guerreiros ou arqueiros | Avançam com cuidado. | Andam no máximo 2 hex por turno, mantendo a formação e guardando PA para atacar. | 2 |
+| Avanço rápido | R | todos, guerreiros ou arqueiros | Avançam depressa. | Gastam os PA para fechar a distância. A formação fica solta. | 3 |
+| Formar linha defensiva | L | todos ou guerreiros | Aumenta a defesa só corpo a corpo. | +10 de defesa corpo a corpo. As tropas formam uma linha contínua e não saem dela. | 3 |
+| Levantar escudos | E | todos ou guerreiros | Aumenta a defesa corpo a corpo e à distância. | +8 de defesa corpo a corpo e +8 à distância, só para quem tem escudo. | 4 |
+| Disparar | T | arqueiros | Arcos e bestas atiram nos inimigos mais próximos. | Sem bônus. | 2 |
+| Preparar disparo | M | arqueiros | Ficam mirando e ganham pontos na habilidade à distância. | +15 de ataque à distância no tiro mirado. | 3 |
+| Atacar | A | todos, guerreiros ou arqueiros | Atacam os inimigos mais próximos, com bônus no primeiro ataque. | +10 de ataque no primeiro ataque de cada tropa depois que a ordem assenta. | 4 |
+| Manter posição | S | todos, guerreiros ou arqueiros | Param onde estão. | Sem bônus. É o mesmo comportamento de quem está sem ordem. | 1 |
+| Recuar | V | todos, guerreiros ou arqueiros | Abrem distância do inimigo. | Sem bônus. Evitam dar ataque grátis e não saem do alcance do líder. | 3 |
+| Flanquear | F | todos ou guerreiros | Contornam a linha e atacam quem já está ocupado com um aliado. | Sem bônus próprio: ganham o bônus de cerco que já existe. | 4 |
+| Proteger o líder | P | todos, guerreiros ou arqueiros | Fecham em volta do líder e batem em quem chegar perto dele. | Sem bônus. | 3 |
+| Cessar fogo | C | arqueiros | Param de atirar e ficam onde estão. | Sem bônus. Serve quando os aliados já estão colados no inimigo. | 1 |
+| Procurar terreno elevado | H | todos, guerreiros ou arqueiros | Sobem para o ponto mais alto ao alcance. | Depende do relevo, que ainda não existe. Hoje o jogo avisa que o campo é plano e devolve o PL. | 3 |
+
+Algumas ordens aceitam um **alvo preferido** dito no grito: "Ataquem o líder!", "Mirem nos arqueiros!", "Acabem com os feridos!". Valem para Avanço rápido, Disparar, Preparar disparo, Atacar e Flanquear. Os alvos possíveis são o líder inimigo, os arqueiros inimigos e os feridos. A tropa dá mais peso a esses alvos, sem largar uma jogada muito melhor.
+
+### Como gritar (proposta)
+
+| Ordem | Exemplos que o jogo entende |
+| --- | --- |
+| Avanço devagar | "Avancem devagar!", "Avancem!", "Em frente, com cuidado!", "Marchem!" |
+| Avanço rápido | "Avancem rápido!", "Corram!", "Depressa, avancem!" |
+| Formar linha defensiva | "Formar linha defensiva!", "Segurem a linha!", "Em formação!", "Defendam!" |
+| Levantar escudos | "Levantar escudos!", "Escudos!", "Parede de escudos!", "Cubram-se!" |
+| Disparar | "Disparem!", "Fogo!", "Atirem à vontade!", "Soltem as flechas!" |
+| Preparar disparo | "Preparar disparo!", "Mirem!", "Apontar!", "Mirem no líder deles!" |
+| Atacar | "Ataquem!", "Carga!", "Pra cima deles!", "Matem o líder!" |
+| Manter posição | "Mantenham a posição!", "Alto!", "Fiquem onde estão!", "Não avancem!" |
+| Recuar | "Recuem!", "Para trás!", "Retirada!", "Afastem-se!" |
+| Flanquear | "Pelos flancos!", "Flanqueiem!", "Cerquem eles!" |
+| Proteger o líder | "Protejam o líder!", "Comigo!", "A mim!", "Reagrupem!" |
+| Cessar fogo | "Cessar fogo!", "Segurem o fogo!", "Não atirem!" |
+| Procurar terreno elevado | "Procurem terreno elevado!", "Subam a colina!", "Tomem o morro!" |
+
+### Como o jogo lê a ordem (proposta)
+
+- **Acentos, maiúsculas e pontuação não importam.** Letras repetidas viram uma só ("Avançeeem!!!" vira "avancem").
+- **Erros de digitação pequenos passam**: nenhum em palavras de até 3 letras, 1 em palavras de 4 a 7 letras e 2 a partir de 8. Letras trocadas de lugar contam como um erro só ("dispraem" vira "disparem"). Palavras comuns que não são ordem ("minha", "tipo", "parte") nunca são confundidas com ordens parecidas ("linha", "tiro", "pare").
+- **Formas do verbo**: o jogo reconhece o começo das palavras, então "avancem", "avançando" e "avançai" são a mesma ordem.
+- **Quem é chamado**: o grupo dito antes do verbo ("Arqueiros, ...") é quem ouve. Se o player escolheu "todos" e gritou "Arqueiros, disparem!", só os arqueiros ouvem. Se escolheu os guerreiros e gritou "Arqueiros, ...", o jogo avisa da contradição e devolve o PL. Depois do verbo e de um artigo, o grupo vira alvo: "Ataquem os arqueiros!".
+- **Negação**: só vale para parar algo. "Não avancem" e "ninguém se mexe" viram Manter posição. "Não atirem" vira Cessar fogo. "Não recuem" vira Manter posição. Outras negações ("não defendam") são confusas demais para o meio da batalha.
+- **O que o jogo não entende** (e devolve o PL):
+  - Grito sem nenhuma ordem conhecida. Se uma palavra parece uma ordem mal escrita, o aviso sugere a certa ("Você quis dizer 'disparem'?").
+  - Duas ordens diferentes de uma vez ("Avancem e recuem!"). O aviso diz o que as tropas ouviram.
+  - Condições ("se", "quando", "caso", "assim que"): "Se eles chegarem, ataquem" é complexo demais.
+  - Grito com mais de 12 palavras, sem contar o grupo chamado. A caixa aceita até 90 letras.
+  - Ordem que não vale para o grupo ("Arqueiros, levantar escudos!"), sem tropa do grupo no alcance, ou que todas as tropas no alcance já cumprem.
+- **Palavras que reforçam a mesma ordem** se juntam numa só: "Avancem e ataquem!" é Atacar; "Segurem a linha com os escudos!" é Levantar escudos.
+- O texto escrito pelo player é o que aparece no balão de fala do líder e no registro de combate.
+
+### Assentar e estresse (proposta)
+
+- **Quando assenta**: a ordem dada na rodada R passa pelo resto da rodada R e pela rodada R+1 inteira. Ela assenta no começo da rodada R+2 e dá o bônus a partir daí. Exemplo: "Preparar disparo!" na rodada 1 deixa os arqueiros mirando nas rodadas 1 e 2; na rodada 3 eles atiram com +15.
+- O **comportamento** vale na hora. Só o **bônus** espera assentar.
+- **Repetir a mesma ordem** não reinicia a contagem e não estressa. Mudar só o alvo ("Ataquem!" e depois "Ataquem o líder!") também não: é um ajuste. Os dois custam o PL da ordem.
+- **Quem fica sob estresse**: só as tropas no alcance que ouvem a ordem nova e cuja ordem anterior ainda não tinha assentado. Quem estava sem ordem, ou com a ordem já assentada, não se estressa.
+- **Força**: cada nível tira **5 de ataque e 5 de defesa**, corpo a corpo e à distância, até o nível 4 (−20). A primeira ordem repentina dá nível 1. Trocar de novo antes de assentar soma um nível. Quando uma ordem assenta, a conta volta a zero.
+- **Duração**: o estresse vale até o fim do próximo turno da tropa. Se ela ainda não agiu na rodada, acaba no fim do turno dela nesta rodada; se já agiu, no fim do turno da rodada seguinte.
+- **A ordem não vence**: as tropas seguem a última ordem até o líder dar outra. A tropa fora do alcance segue a última que ouviu, com o bônus se ela já tinha assentado.
+- **PL**: renova a cada turno do líder, como os PA. O que sobra não acumula.
+- **Dar ordem não gasta PA**. O líder pode gritar e ainda andar ou atacar no mesmo turno.
+- **Ordem para "todos"** custa o mesmo PL que para uma divisão só.
+- **Alcance**: conta a distância em hexágonos entre o líder e a tropa no momento da ordem. Não precisa de linha de visão.
+- **Atacar**: o bônus vale no primeiro ataque que a tropa faz por vontade própria depois que a ordem assenta. Ataques de reação (zona de controle) não usam nem gastam o bônus.
+- **Preparar disparo**: a tropa mira enquanto a ordem assenta e não atira, para não desperdiçar a mira. Depois, todos os tiros no alvo mirado ganham o bônus (até 2 por turno, por causa dos PA). Andar perde a mira. Se o alvo cair, fugir ou sair da linha de tiro, o arqueiro mira em outro.
+- **Na tela**: a letra no ombro da tropa fica apagada enquanto a ordem assenta e ganha um "!" laranja quando a tropa está sob estresse. A aba de comando mostra, para guerreiros e arqueiros, a ordem atual, se ela já assentou (ou em que rodada assenta) e quantas tropas estão sob estresse.
+- **Prévia enquanto escreve**: embaixo da caixa, o jogo mostra o que as tropas estão entendendo, o custo, quantas tropas vão ouvir e quantas vão ficar sob estresse. Também mostra o aviso antes de gritar, quando a ordem não vai ser entendida. Se o chefe preferir mais tensão, dá para tirar a prévia e só avisar depois do grito.
+- **Quem dá ordens**: o líder do pelotão ou, sem nenhum líder vivo no lado, o comandante interino. O líder em fuga não dá ordens até recobrar a coragem.
+- **Líderes da IA** escolhem a ordem pelas regras da seção 10.3 e só trocam uma ordem depois que ela assenta, então nunca estressam as próprias tropas. Eles gritam a forma padrão ("Guerreiros, formar linha defensiva!"). Por enquanto usam só as sete ordens originais.
+- **Tiro por cima e flecha perdida** (decidido pelo chefe): flechas passam por cima de quem estiver no caminho, aliado ou inimigo; só obstáculos bloqueiam a linha de tiro. Se a flecha errar e houver aliados do atirador em contato com o alvo, ela pode acertar um deles: 35% por aliado em contato, no máximo 70%, sorteando qual. Corpo a corpo nunca se perde assim. A ficha do alvo e a dica do mouse mostram a chance de acertar um aliado; a IA pesa esse risco e pode decidir não atirar.
+- **Sem pelotão**: combatentes sem pelotão (só existem no encontro antigo de 3 contra 4, usado nos testes) lutam por conta própria, avançando e atacando.
 
 ### Como a IA cumpre cada ordem (proposta)
 
 | Ordem | O que a tropa tenta fazer | O que ela evita | Quando não dá |
 | --- | --- | --- | --- |
-| Avanço devagar! | Chegar mais perto do inimigo sem abrir buraco na linha. Ataca se começar o turno colada num inimigo. | Sair de zona de controle inimiga, passar à frente dos vizinhos. | Segura a posição. |
-| Avanço rápido! | Chegar o mais perto possível do inimigo mais próximo do pelotão e atacar se alcançar. | Parar no meio do caminho com PA sobrando. | Anda o que der. |
-| Formar linha defensiva! | Ocupar uma vaga na linha virada para o inimigo e atacar quem chegar ao lado. | Avançar além da linha ou perseguir. | Tapa o buraco mais próximo da linha. |
-| Levantar escudos! | Ficar no lugar e atacar só quem estiver colado. | Andar mais de 1 hex. | Fica parada. |
-| Arqueiros, disparem! | Atirar no inimigo que mais vale a flecha ao alcance, por cima de quem estiver no caminho. Se ninguém estiver no alcance, andar até ter alguém. Segura o tiro quando um aliado está em contato com o alvo e o risco de acertá-lo pesa mais que o tiro. | Ficar colada num inimigo corpo a corpo. | Se estiver engajada, recua 1 hex quando isso não der ataque grátis ao inimigo. |
-| Arqueiros, preparar disparo! | 1º turno: mira sem atirar. 2º e 3º turnos: atira com o bônus. | Andar, porque andar perde a mira. | Se o alvo sumir, mira no novo inimigo mais próximo. |
-| Atacar! | Atacar o inimigo mais próximo. Guerreiros andam até ele. | Trocar de alvo sem motivo. | Anda em direção ao inimigo mais próximo. |
+| Avanço devagar | Chegar mais perto do inimigo sem abrir buraco na linha. Ataca se começar o turno colada num inimigo. | Sair de zona de controle inimiga, passar à frente dos vizinhos. | Segura a posição. |
+| Avanço rápido | Chegar o mais perto possível do inimigo mais próximo do pelotão e atacar se alcançar. | Parar no meio do caminho com PA sobrando. | Anda o que der. |
+| Formar linha defensiva | Ocupar uma vaga na linha virada para o inimigo e atacar quem chegar ao lado. | Avançar além da linha ou perseguir. | Tapa o buraco mais próximo da linha. |
+| Levantar escudos | Ficar no lugar e atacar só quem estiver colado. | Andar mais de 1 hex. | Fica parada. |
+| Disparar | Atirar no inimigo que mais vale a flecha ao alcance, por cima de quem estiver no caminho. Se ninguém estiver no alcance, andar até ter alguém. Segura o tiro quando um aliado está em contato com o alvo e o risco de acertá-lo pesa mais que o tiro. | Ficar colada num inimigo corpo a corpo. | Se estiver engajada, recua 1 hex quando isso não der ataque grátis ao inimigo. |
+| Preparar disparo | Mirar sem atirar enquanto a ordem assenta. Depois, atirar com o bônus no alvo mirado. | Andar, porque andar perde a mira. | Se o alvo sumir, mira no novo inimigo mais próximo. |
+| Atacar | Atacar o inimigo mais próximo. Guerreiros andam até ele. | Trocar de alvo sem motivo. | Anda em direção ao inimigo mais próximo. |
+| Manter posição | Ficar no lugar e atacar quem estiver colado. Arqueiros atiram no que estiver ao alcance. | Andar. | Fica parada. |
+| Recuar | Abrir distância do inimigo, sem sair do alcance do líder. | Sair de zona de controle dando ataque grátis. | Fica no lugar e se defende. |
+| Flanquear | Contornar e atacar o inimigo que já está colado num aliado, para somar o bônus de cerco. | Bater de frente num inimigo livre. | Avança em direção ao inimigo. |
+| Proteger o líder | Ficar colada no líder e atacar quem chegar perto dele. | Se afastar do líder para perseguir. | Anda em direção ao líder. |
+| Cessar fogo | Ficar no lugar sem atirar. | Atirar, mesmo com alvo bom. | Fica parada. |
+| Procurar terreno elevado | Subir ao ponto mais alto ao alcance. | (Depende do relevo.) | Hoje não pode ser dada: o campo é plano. |
 
-**Sem ordem** (no começo da batalha ou depois que a ordem vence), as tropas ficam em **Manter posição**: não andam, atacam quem estiver colado, e os arqueiros atiram em quem estiver no alcance. Isso não é uma ordem da aba e não custa PL.
+O alvo preferido dito no grito ("o líder", "os arqueiros", "os feridos") pesa 1,5 vez na escolha do alvo.
 
-### Recarga, PL e alcance (proposta)
-
-- **Recarga por divisão**: guerreiros e arqueiros têm, cada um, seu relógio de 3 turnos. Uma ordem para "todos" exige as duas divisões livres e reinicia as duas. Assim dá para os arqueiros atirarem enquanto os guerreiros seguram a linha.
-- **Duração**: a ordem vale do momento em que é dada até o fim da terceira rodada, contando a atual. A recarga acaba junto com ela.
-- **PL**: renova a cada turno do líder, como os PA. O que sobra não acumula.
-- **Dar ordem não gasta PA**. O líder pode dar a ordem e ainda andar ou atacar no mesmo turno.
-- **Ordem para "todos"** custa o mesmo PL que para uma divisão só.
-- **Alcance**: conta a distância em hexágonos entre o líder e a tropa no momento da ordem. Não precisa de linha de visão.
-- **Tropa fora do alcance** segue a última ordem que recebeu mesmo depois dos 3 turnos, até voltar ao alcance. Ela fica "sem notícias": cumpre o comportamento da ordem, mas **sem o bônus**, que acaba junto com os 3 turnos. Isso dá peso a manter o pelotão perto do líder e impede que uma ordem velha renda bônus para sempre.
-- **Atacar!**: o bônus vale no primeiro ataque que a tropa faz por vontade própria durante a ordem. Ataques de reação (zona de controle) não usam nem gastam o bônus.
-- **Preparar disparo**: mirar gasta o turno inteiro. Nos turnos seguintes, todos os tiros no alvo mirado ganham o bônus (até 2 por turno, por causa dos PA). Andar perde a mira. Se o alvo cair, fugir ou sair da linha de tiro, o arqueiro mira em outro.
-- **Quem dá ordens**: o líder do pelotão ou, sem nenhum líder vivo no lado, o comandante interino. O líder em fuga não dá ordens até recobrar a coragem.
-- **Tiro por cima e flecha perdida** (decidido pelo chefe): flechas passam por cima de quem estiver no caminho, aliado ou inimigo; só obstáculos bloqueiam a linha de tiro. Se a flecha errar e houver aliados do atirador em contato com o alvo, ela pode acertar um deles: 35% por aliado em contato, no máximo 70%, sorteando qual. Corpo a corpo nunca se perde assim. A ficha do alvo e a dica do mouse mostram a chance de acertar um aliado; a IA pesa esse risco e pode decidir não atirar.
-- **Sem pelotão**: combatentes sem pelotão (só existem no encontro antigo de 3 contra 4, usado nos testes) lutam por conta própria, avançando e atacando.
+**Sem ordem** (no começo da batalha), as tropas ficam em Manter posição sem custo de PL.
 
 ## 7. Morte do líder e sucessão
 
@@ -232,7 +294,7 @@ flowchart TD
 - **Contato no meio da rodada**: no instante em que alguém do grupo ataca ou é atacado, a vez de grupo se divide em vezes individuais para quem ainda não agiu naquela rodada. Elas entram na fila pela iniciativa. Quem já agiu não age de novo. Isso vale para os dois lados: quem atacou e quem foi atacado.
 - **Saída do combate**: se o grupo passa uma rodada inteira sem atacar, sem ser atacado e sem ninguém colado a um inimigo, ele volta a agir em grupo na rodada seguinte.
 - **Ordem no modo individual**: o líder dá a ordem na vez dele, e ela vale na hora para quem do pelotão ainda vai agir naquela rodada.
-- **Contagem**: os 3 turnos de ordem e de recarga contam no fim de cada rodada.
+- **Contagem**: o assentamento das ordens e o estresse contam por rodada (seção 6).
 
 ```mermaid
 flowchart TD
@@ -246,7 +308,7 @@ flowchart TD
   G --> C
   C -->|Vez individual| H[Combatente age pela própria iniciativa]
   H --> C
-  C -->|Fila vazia| I[Fim da rodada: conta turnos das ordens, recargas e status]
+  C -->|Fila vazia| I[Fim da rodada: assenta ordens, tira estresse vencido e atualiza status]
   I --> A
 ```
 
@@ -306,7 +368,7 @@ Antes das tropas agirem, o pelotão monta um plano rápido:
 Decide as ordens, o movimento do próprio líder e as transferências de tropas.
 
 - Lê a situação em números: força de cada lado perto de cada pelotão, distância até o inimigo, quantos arqueiros cada lado tem, moral média e terreno.
-- Avalia cada ordem possível, inclusive "não ordenar agora" para guardar a recarga:
+- Avalia cada ordem possível, inclusive "não ordenar agora". Como a ordem leva um turno para assentar, o líder IA decide pensando no que o pelotão vai precisar quando as linhas se encontrarem, e só troca uma ordem depois que ela assenta, para não estressar as tropas:
   - **Versão 1**, regras com pontuação: rápidas e fáceis de ajustar. Exemplo: inimigo longe e com muitos arqueiros leva a "Levantar escudos!" e "Avanço devagar!".
   - **Versão 2**, simulação curta: o motor é determinístico, então dá para copiar o estado, simular 2 ou 3 rodadas para cada ordem candidata, com algumas sementes diferentes, e escolher a que deixa o lado melhor (vida, armadura, moral e posição). Essa versão vira o nível difícil.
 - **Estratégia do lado**: escolhe o flanco de cada pelotão, mantém a proporção de 20 por líder, protege os próprios líderes (perder um líder custa caro) e caça os líderes do player.
@@ -349,7 +411,7 @@ A IA nunca trapaceia (seção 10, início). A régua de aprovação:
 **O que muda no modelo**:
 
 - `Unit` ganha papel (líder ou tropa), subclasse, pelotão, ordem atual e PL.
-- `BattleState` ganha pelotões, recargas e uma fila com vezes de grupo.
+- `BattleState` ganha pelotões, a última ordem de cada divisão e uma fila com vezes de grupo. `Unit` ganha o estresse.
 - O tabuleiro passa a ter tamanho variável.
 - O encontro sai do `createBattle` fixo e passa a vir de dados.
 
@@ -357,6 +419,7 @@ A IA nunca trapaceia (seção 10, início). A régua de aprovação:
 
 1. ✅ Modelo de dados (líder, tropa, pelotão, nota de atributo), mapa maior com câmera e um encontro de teste de 20 contra 20, com 1 líder por lado.
 2. ✅ Aba de comando: ordens, PL, recarga, alcance e a IA de tropa seguindo ordens. Entraram também a IA de ordens do líder inimigo (versão 1), o comandante interino e a regra do Líder Supremo (a batalha de teste passou a usar um líder comum). Para o torneio de IA ser justo, a batalha de teste ficou espelhada (mesmo terreno, mesmo bloco de formação dentro dos 5 hex de alcance) e os saqueadores do campo ganharam o cutelo de saque, que bate como a maça. Empates de iniciativa passaram a ser sorteados pela semente, sem favorecer um lado.
+   - ✅ **Ordens gritadas** (versão 0.5): a lista de botões com recarga deu lugar à caixa de texto, com o leitor de ordens do jogo (`src/commands.ts`), 13 ordens, alvo preferido, assentamento e estresse.
 3. Vez de grupo e passagem para iniciativa no contato.
 4. Tela de preparação (escolher os líderes, com o Supremo só como último recurso, e distribuir as tropas), regra de 20 por líder (Sobrecarregado e Pressão de liderança), transferências e sucessão entre líderes.
 5. IA de líder versão 2 (simulação), estratégia do lado, escala de 100 contra 100, otimização e Web Worker.
@@ -372,15 +435,15 @@ Cada pergunta já tem uma proposta. Se o chefe não mudar, a proposta vale.
 | 2 | Se o Líder Supremo cair, a batalha acaba em derrota? | **Decidida pelo chefe**: a morte dele encerra a campanha, então ele normalmente fica fora das batalhas. Se estiver em campo e cair, a batalha acaba em derrota na hora. |
 | 3 | Sobrecarga e pressão pioram com o tamanho do excesso (25 tropas pior que 21)? | Não nesta fase. Efeito fixo. |
 | 4 | A Pressão de liderança aparece quando o lado perde tropas no meio da luta? | Não. Só no posicionamento, em transferências e na morte de um líder. |
-| 5 | A recarga é separada por divisão (guerreiros e arqueiros) ou uma só para o líder? | Separada por divisão. |
+| 5 | A recarga é separada por divisão (guerreiros e arqueiros) ou uma só para o líder? | **Decidida pelo chefe**: não há mais recarga. O líder dá ordens quando quiser; trocar uma ordem antes de assentar causa estresse. O assentamento é contado por tropa. |
 | 6 | Ordem para "todos" custa mais PL? | Não. Mesmo custo. |
 | 7 | Dar ordem também gasta PA? | Não. Só PL. |
 | 8 | O alcance de comando precisa de linha de visão? | Não. Só distância. |
-| 9 | A tropa fora do alcance segue a última ordem para sempre ou ela vence em 3 turnos? | Segue até voltar ao alcance e receber outra. |
+| 9 | A tropa fora do alcance segue a última ordem para sempre? | Sim. A ordem não vence mais: a tropa segue a última que ouviu até voltar ao alcance e receber outra. |
 | 10 | O que as tropas fazem sem ordem? | Manter posição. |
 | 11 | "Levantar escudos!" vale para quem não tem escudo? | Não. Sem escudo, sem bônus. |
-| 12 | "Preparar disparo": mira um turno e atira nos outros dois, ou alterna mirar e atirar? | Mira no 1º turno e atira com bônus no 2º e no 3º. Andar perde a mira. |
-| 13 | "Atacar!": o bônus vale no primeiro ataque da ordem ou no primeiro de cada turno? | Só no primeiro da ordem. |
+| 12 | "Preparar disparo": quando o arqueiro atira com o bônus? | Mira enquanto a ordem assenta e atira com o bônus depois. Andar perde a mira. |
+| 13 | "Atacar!": o bônus vale no primeiro ataque da ordem ou no primeiro de cada turno? | Só no primeiro ataque depois que a ordem assenta. |
 | 14 | Transferir tropas em batalha custa PL? Quantas por vez? A queda de moral atinge só quem foi transferido? | 3 PL do líder que recebe, várias tropas de uma vez, dentro do alcance dele. Só as transferidas perdem moral. |
 | 15 | O comandante interino sofre a regra de 20 por líder? | Não. |
 | 16 | Como termina uma batalha de 100 contra 100? Lutar até o último cair é demorado. | Um lado perde quando não tem mais nenhum líder e mais da metade das tropas dele está morta ou em fuga, ou quando o player manda recuar. |
@@ -388,8 +451,11 @@ Cada pergunta já tem uma proposta. Se o chefe não mudar, a proposta vale.
 | 18 | Vai ter névoa de guerra? Isso muda bastante a IA. | Não nesta fase. |
 | 19 | Arma de arremesso (dardo, machadinha) conta como arqueiro? | Decidir quando essas armas existirem. |
 | 20 | O Supremo pode ir para a batalha quando ainda há outros líderes disponíveis? | Pode, com confirmação e aviso do risco. A tela sempre sugere os outros líderes primeiro. |
-| 21 | A tropa sem notícias (fora do alcance, ordem vencida) mantém o bônus da ordem? | Não. Mantém o comportamento e perde o bônus. |
+| 21 | A tropa sem notícias (fora do alcance) mantém o bônus da ordem? | Sim, se a ordem já tinha assentado. Como a ordem não vence mais, a tropa só perde o bônus quando recebe outra ordem. |
 | 22 | Quem tem escudo? | Quem usa arma de uma mão (maça, lâmina). Lança, arco e as armas dos líderes não. |
+| 23 | Quanto vale o estresse? | −5 de ataque e −5 de defesa por nível, até o nível 4. Cada troca seguida antes de assentar soma um nível. |
+| 24 | O player vê o que as tropas entenderam antes de gritar? | Sim: a caixa mostra a ordem entendida, o custo, quem ouve e quem fica sob estresse. Dá para tirar se o chefe quiser mais tensão. |
+| 25 | Que ordens além das sete originais o leitor entende? | Manter posição, Recuar, Flanquear, Proteger o líder, Cessar fogo e Procurar terreno elevado (esta espera o relevo). |
 
 ## Histórico
 
@@ -397,3 +463,4 @@ Cada pergunta já tem uma proposta. Se o chefe não mudar, a proposta vale.
 - **0.2 (2026-11-01)**: fase 1 implementada.
 - **0.3 (2026-11-01)**: o Líder Supremo fica fora das batalhas e a morte dele encerra a campanha (decisão do chefe). Meta de IA melhor que a de *Battle Brothers*, com a lista de habilidades e a régua de aprovação. Fase 2 implementada.
 - **0.4 (2026-11-01)**: arqueiros atiram por cima da linha; flecha que erra pode acertar aliado em contato com o alvo, e a IA segura o tiro quando não compensa (pedido do chefe).
+- **0.5 (2026-11-02)**: ordens gritadas no lugar da lista de ordens com recarga (decisão do chefe). O player escolhe o grupo e escreve a ordem; o leitor do jogo entende 13 ordens, sinônimos e erros de digitação, e devolve o PL quando não entende. A ordem vale até ser trocada, só dá bônus depois de assentar por um turno inteiro, e trocar antes disso causa estresse.

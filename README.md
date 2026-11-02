@@ -30,7 +30,7 @@ npm run preview  # serve a versão compilada
 ## Jogar
 
 - Você controla só os líderes, marcados com um estandarte. As tropas cumprem a ordem do líder; sem ordem, seguram a posição.
-- **3** a **9**: dar uma das sete ordens da aba de comando. **T**: escolher para quem ela vai (todos, só guerreiros ou só arqueiros). Passe o cursor numa ordem para ver o efeito e quem vai ouvi-la; o contorno dourado no campo é o alcance de comando.
+- **Enter** (ou o botão **Dar ordens**): o líder grita uma ordem. Escolha para quem ela vai com **1** a **3** (guerreiros, arqueiros ou todos) e escreva a ordem, como "Arqueiros, preparar disparo!" ou "Segurem a linha!". **Enter** grita, **Esc** cancela. Embaixo da caixa aparece o que as tropas estão entendendo; o contorno dourado no campo é o alcance de comando.
 - Clique num hexágono iluminado para mover. Passe o cursor antes para ver caminho e custos.
 - Clique num inimigo para realizar o ataque básico, respeitando alcance, linha de tiro e recursos.
 - **1**: selecionar movimento; **2**: selecionar ataque.
@@ -65,23 +65,31 @@ Cada lado tem 1 líder, 14 guerreiros (maça ou lança do nosso lado, cutelo ou 
 
 ### Ordens
 
-Ordens custam PL (pontos de liderança), não PA. O Líder de Combate tem 6 PL por turno e alcance de comando de 5 hexágonos; o comandante interino também. Uma ordem vale pela rodada em que é dada e pelas duas seguintes, e a divisão que a recebeu só aceita outra quando ela acaba. Quem está fora do alcance não ouve a ordem nova; se uma ordem vence com a tropa fora do alcance, ela continua cumprindo, mas sem o bônus. A letra no ombro de cada tropa mostra a ordem que ela segue.
+O líder grita as ordens. O jogador escolhe o grupo e escreve a ordem; um leitor próprio do jogo (`src/commands.ts`, sem serviço externo) entende sinônimos, formas do verbo, falta de acento e pequenos erros de digitação. Se a ordem não for entendida (sem ordem conhecida, duas ordens de uma vez, condições como "se" e "quando", mais de 12 palavras ou contradição com o grupo escolhido), o jogo avisa e devolve o PL. Alguns gritos escolhem um alvo preferido: "Ataquem o líder!", "Mirem nos arqueiros!", "Acabem com os feridos!".
 
-| Tecla | Ordem | PL | Para quem | Efeito |
-| :---: | --- | ---: | --- | --- |
-| 3 | Avanço devagar! (D) | 2 | todos ou uma divisão | Avançam até 2 hexágonos por turno, sem sair da linha. |
-| 4 | Avanço rápido! (R) | 3 | todos ou uma divisão | Gastam os PA para fechar a distância. |
-| 5 | Formar linha defensiva! (L) | 3 | todos ou guerreiros | +10 de defesa corpo a corpo; seguram a linha. |
-| 6 | Levantar escudos! (E) | 4 | todos ou guerreiros | +8 de defesa corpo a corpo e à distância para quem tem escudo; andam no máximo 1 hexágono. |
-| 7 | Arqueiros, disparem! (T) | 2 | arqueiros | Atiram por cima da linha no alvo que mais vale a flecha e seguram o tiro quando o risco de acertar um aliado não compensa; sem alvo, andam até ter linha de tiro. |
-| 8 | Arqueiros, preparar disparo! (M) | 3 | arqueiros | Miram um turno sem atirar; depois, +15 de ataque no alvo mirado. Andar perde a mira. |
-| 9 | Atacar! (A) | 4 | todos ou uma divisão | Partem para cima; +10 no primeiro ataque de cada tropa durante a ordem. |
+Ordens custam PL (pontos de liderança), não PA. O Líder de Combate tem 6 PL por turno e alcance de comando de 5 hexágonos; o comandante interino também. Não há recarga: a ordem vale até ser trocada. Ela só dá bônus depois de **assentar**, passando uma rodada inteira sem troca (dada na rodada 1, assenta na rodada 3). Trocar uma ordem que ainda não assentou deixa as tropas sob **estresse**: −5 de ataque e de defesa por nível, até o fim do próximo turno delas; cada troca seguida soma um nível, até 4. Repetir a ordem ou só mudar o alvo não estressa. Quem está fora do alcance não ouve a ordem nova e segue a anterior. A letra no ombro de cada tropa mostra a ordem que ela segue: apagada enquanto assenta e com "!" sob estresse.
+
+| Ordem (marca) | Como gritar | PL | Para quem | Efeito |
+| --- | --- | ---: | --- | --- |
+| Avanço devagar (D) | "Avancem devagar!", "Marchem!" | 2 | todos ou uma divisão | Avançam até 2 hexágonos por turno, sem sair da linha. |
+| Avanço rápido (R) | "Avancem rápido!", "Corram!" | 3 | todos ou uma divisão | Gastam os PA para fechar a distância. |
+| Formar linha defensiva (L) | "Segurem a linha!", "Em formação!" | 3 | todos ou guerreiros | +10 de defesa corpo a corpo; seguram a linha. |
+| Levantar escudos (E) | "Escudos!", "Parede de escudos!" | 4 | todos ou guerreiros | +8 de defesa corpo a corpo e à distância para quem tem escudo; andam no máximo 1 hexágono. |
+| Disparar (T) | "Disparem!", "Fogo!" | 2 | arqueiros | Atiram por cima da linha no alvo que mais vale a flecha e seguram o tiro quando o risco de acertar um aliado não compensa; sem alvo, andam até ter linha de tiro. |
+| Preparar disparo (M) | "Preparar disparo!", "Mirem!" | 3 | arqueiros | Miram sem atirar enquanto a ordem assenta; depois, +15 de ataque no alvo mirado. Andar perde a mira. |
+| Atacar (A) | "Ataquem!", "Carga!" | 4 | todos ou uma divisão | Partem para cima; +10 no primeiro ataque de cada tropa depois que a ordem assenta. |
+| Manter posição (S) | "Alto!", "Fiquem onde estão!" | 1 | todos ou uma divisão | Param onde estão e atacam só quem chegar perto. |
+| Recuar (V) | "Recuem!", "Para trás!" | 3 | todos ou uma divisão | Abrem distância do inimigo sem sair do alcance do líder. |
+| Flanquear (F) | "Pelos flancos!", "Cerquem eles!" | 4 | todos ou guerreiros | Atacam quem já está ocupado com um aliado, somando o bônus de cerco. |
+| Proteger o líder (P) | "Protejam o líder!", "Comigo!" | 3 | todos ou uma divisão | Fecham em volta do líder. |
+| Cessar fogo (C) | "Cessar fogo!", "Não atirem!" | 1 | arqueiros | Param de atirar e ficam onde estão. |
+| Procurar terreno elevado (H) | "Subam a colina!" | 3 | todos ou uma divisão | Espera o relevo: no campo plano de hoje, o jogo avisa e devolve o PL. |
 
 Os bônus são multiplicados pela potência de quem manda (1× para o Líder de Combate). Reações a quem sai de um hexágono ameaçado não usam o bônus de ataque.
 
 ### A IA
 
-Cada tropa pontua todas as opções do turno (ficar ou ir para cada hexágono alcançável, atacando ou não) pelo dano esperado, chance de matar, valor do alvo (líderes e arqueiros valem mais), risco de levar ataques e reações, coesão com o resto da linha e o quanto a opção cumpre a ordem recebida. Arqueiros descontam o risco de a flecha errar e acertar um aliado em contato com o alvo, e seguram o tiro quando esse risco pesa mais que o tiro. Ordens limitam o que a tropa pode fazer: na linha defensiva ela anda no máximo 1 hexágono, no avanço devagar no máximo 2. O líder inimigo e o comandante interino escolhem ordens olhando distância, contato, força relativa e duelo de arqueiros. A IA antiga, que só atacava o mais próximo, continua no motor como régua: a nova precisa vencê-la dos dois lados do mapa, e os testes conferem isso.
+Cada tropa pontua todas as opções do turno (ficar ou ir para cada hexágono alcançável, atacando ou não) pelo dano esperado, chance de matar, valor do alvo (líderes e arqueiros valem mais), risco de levar ataques e reações, coesão com o resto da linha e o quanto a opção cumpre a ordem recebida. Arqueiros descontam o risco de a flecha errar e acertar um aliado em contato com o alvo, e seguram o tiro quando esse risco pesa mais que o tiro. Ordens limitam o que a tropa pode fazer: na linha defensiva ela anda no máximo 1 hexágono, no avanço devagar no máximo 2, e em manter posição e cessar fogo não anda. O alvo preferido dito no grito pesa mais na escolha do alvo. O líder inimigo e o comandante interino escolhem ordens olhando distância, contato, força relativa e duelo de arqueiros, e só trocam uma ordem depois que ela assenta, para não estressar as tropas. A IA antiga, que só atacava o mais próximo, continua no motor como régua: a nova precisa vencê-la dos dois lados do mapa, e os testes conferem isso.
 
 ### Aproximações deliberadas
 
@@ -94,6 +102,7 @@ Ainda não há altura de terreno, cobertura parcial, dispersão de projéteis al
 ## Organização
 
 - `src/game.ts`: motor de combate determinístico, sem dependência do Phaser ou DOM. Inclui líderes, subclasses, pelotões, nota de atributo, ordens, PL e comando interino.
+- `src/commands.ts`: o leitor de ordens gritadas, que transforma o texto do jogador numa ordem.
 - `src/ai.ts`: a IA das tropas e dos líderes que o jogador não controla.
 - `src/encounters.ts`: os encontros. O Campo das Salinas (20 contra 20) é o que o jogo abre; a emboscada original de 3 contra 4 continua como base dos testes de regras.
 - `src/game.test.ts`: testes de regras e simulações completas.
