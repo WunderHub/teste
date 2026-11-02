@@ -8,9 +8,9 @@
  */
 import {
   aim, attack, commandedPlatoons, commanderOf, controllers, distance, divisionOf, endTurn, expectedDamage,
-  getActive, hasShot, hitChance, isAlive, issueOrder, move, moveAp, ORDER_BONUS, orderInfo, performSimpleAiAction,
+  getActive, hasShot, hitChance, isAlive, isSettled, issueOrder, move, moveAp, ORDER_BONUS, orderInfo, performSimpleAiAction,
   platoonOf, platoonTroops, previewAttack, reachable, strayCandidates, strayChance, tileAt,
-  type ActionResult, type BattleState, type Division, type Hex, type OrderId, type OrderTarget, type Team, type Unit,
+  type ActionResult, type BattleState, type Division, type Hex, type OrderFocus, type OrderId, type OrderTarget, type Team, type Unit,
 } from './game';
 
 /**
@@ -67,7 +67,10 @@ export function profileOf(s: BattleState, unit: Unit): Profile {
   if (commandedPlatoons(s, unit).some(p => platoonTroops(s, p.id).some(t => t.id !== unit.id))) return 'comando';
   if (unit.role === 'leader' || !unit.platoonId) return 'livre';
   const order = unit.order;
-  if (order) return order.stale && order.id === 'arqueiros-preparar' ? 'arqueiros-disparem' : order.id;
+  // No relief on the field yet, so "terreno elevado" has nowhere to go; archers told to flank keep shooting.
+  if (order?.id === 'terreno-elevado') return 'manter';
+  if (order?.id === 'flanquear' && unit.weapon.kind === 'ranged') return 'arqueiros-disparem';
+  if (order) return order.id;
   // A platoon with nobody left to command it fights on its own instead of freezing in place.
   return commanderOf(s, platoonOf(s, unit)) ? 'manter' : 'livre';
 }
@@ -93,13 +96,18 @@ interface Context {
   self: number;
   /** How closely it follows the order: lower when shaken. */
   obedience: number;
+  /** Who the order singled out, if anyone. */
+  focus?: OrderFocus;
   damageFrom: (enemy: Unit) => number;
 }
 
 /** Most hexes each profile lets a troop walk in one turn. */
-const MAX_STEPS: Partial<Record<Profile, number>> = { manter: 0, 'linha-defensiva': 1, 'levantar-escudos': 1, 'avanco-devagar': 2 };
+const MAX_STEPS: Partial<Record<Profile, number>> = { manter: 0, 'manter-posicao': 0, 'cessar-fogo': 0,
+  'linha-defensiva': 1, 'levantar-escudos': 1, 'avanco-devagar': 2 };
 /** Weight of the attack this turn, per profile. */
-const ATTACK_WEIGHT: Partial<Record<Profile, number>> = { atacar: 1.1, 'avanco-rapido': 1.1, livre: 1.1 };
+const ATTACK_WEIGHT: Partial<Record<Profile, number>> = { atacar: 1.1, 'avanco-rapido': 1.1, livre: 1.1, flanquear: 1.1, recuar: 0.4 };
+/** How much more a troop values an enemy its order singled out. */
+const FOCUS_WEIGHT = 1.5;
 const OBEDIENCE = [0, 0.5, 0.8, 1, 1.1];
 
 const nearest = (from: Hex, units: Unit[]): number => units.reduce((best, u) => Math.min(best, distance(from, u.pos)), Infinity);
@@ -124,12 +132,14 @@ function context(s: BattleState, unit: Unit, profile: Profile): Context {
   let self = unit.role === 'leader' ? (unit.supreme ? 4 : WEIGHTS.leader) : profile === 'comando' ? 1.8 : 1;
   if (unit.morale <= 1) self *= 1.6; else if (unit.morale === 2) self *= 1.25;
   if (unit.hp < unit.maxHp * 0.4) self *= 1.4;
-  if (profile === 'avanco-rapido') self *= 0.7; else if (profile === 'atacar' || profile === 'livre') self *= 0.85;
+  if (profile === 'avanco-rapido') self *= 0.7; else if (profile === 'atacar' || profile === 'livre' || profile === 'flanquear') self *= 0.85;
+  else if (profile === 'recuar') self *= 1.3;
   const damage = new Map<string, number>();
   return {
     s, unit, profile, enemies, fighters, allies, ownTroops, start: unit.pos, startDistance, lineDistance, self,
     commander: unit.role === 'troop' ? commanderOf(s, platoonOf(s, unit)) : undefined,
     obedience: OBEDIENCE[unit.morale],
+    focus: unit.role === 'troop' ? unit.order?.focus : undefined,
     damageFrom: enemy => {
       if (!damage.has(enemy.id)) damage.set(enemy.id, expectedDamage(enemy.weapon, unit).hp);
       return damage.get(enemy.id)!;
@@ -172,6 +182,18 @@ function swingsLeft(unit: Unit): number {
   let swings = 0, ap = unit.ap, fatigue = unit.fatigue, ammo = w.ammo ?? Infinity;
   while (swings < 3 && ap >= w.ap && fatigue + w.fatigue <= unit.maxFatigue && ammo > 0) { swings++; ap -= w.ap; fatigue += w.fatigue; ammo--; }
   return swings;
+}
+
+/** Whether this enemy is the kind the order singled out. */
+function matchesFocus(s: BattleState, focus: OrderFocus, enemy: Unit): boolean {
+  if (focus === 'lider') return enemy.role === 'leader' || commandedPlatoons(s, enemy).length > 0;
+  if (focus === 'arqueiros') return enemy.weapon.kind === 'ranged';
+  return enemy.hp < enemy.maxHp * 0.7;
+}
+/** "Ataquem o líder!": strikes on the singled-out kind of enemy weigh more; the wounded weigh more the more they bleed. */
+function focusWeight(focus: OrderFocus | undefined, enemy: Unit, s: BattleState): number {
+  if (!focus || !matchesFocus(s, focus, enemy)) return 1;
+  return focus === 'feridos' ? 1 + FOCUS_WEIGHT * (1 - enemy.hp / enemy.maxHp) * 2 : 1 + FOCUS_WEIGHT;
 }
 
 /** How much the side gains from killing or wounding this enemy. */
@@ -240,19 +262,21 @@ function evaluate(ctx: Context, option: Option): Plan {
   try {
     const here = nearest(option.pos, ctx.fighters.length ? ctx.fighters : ctx.enemies);
     let attackValue = 0, target: Unit | undefined;
-    const swings = swingsLeft(unit);
+    // "Cessar fogo!": the archers hold their arrows whatever the target.
+    const swings = profile === 'cessar-fogo' ? 0 : swingsLeft(unit);
     if (swings) {
       const reachableTargets = ctx.enemies.filter(e => distance(e.pos, unit.pos) <= unit.weapon.range && previewAttack(s, unit, e).allowed);
       const closest = nearest(unit.pos, reachableTargets);
       // Orders that say "the nearest enemies" lean toward them; the AI still weighs who is worth hitting.
-      const lean = profile === 'atacar' || profile === 'arqueiros-disparem' ? 2 : 0.5;
+      const lean = ctx.focus ? 0.5 : profile === 'atacar' || profile === 'arqueiros-disparem' ? 2 : 0.5;
       for (const enemy of reachableTargets) {
-        const value = shotValue(s, unit, enemy, hitChance(s, unit, enemy)) - (distance(enemy.pos, unit.pos) - closest) * lean;
+        const value = shotValue(s, unit, enemy, hitChance(s, unit, enemy)) * focusWeight(ctx.focus, enemy, s)
+          - (distance(enemy.pos, unit.pos) - closest) * lean;
         if (value > attackValue) { attackValue = value; target = enemy; }
       }
       if (swings >= 2) attackValue *= WEIGHTS.secondSwing;
     }
-    const threat = threatAt(ctx), together = cohesion(ctx, option.pos), obeys = compliance(ctx, option, here, Boolean(target));
+    const threat = threatAt(ctx), together = cohesion(ctx, option.pos), obeys = compliance(ctx, option, here, target);
     const score = through * (ATTACK_WEIGHT[profile] ?? 1) * attackValue
       - ctx.self * (WEIGHTS.threat * threat + risk / unit.maxHp * 100)
       - (1 - through) * 15
@@ -289,8 +313,21 @@ function cohesion(ctx: Context, pos: Hex): number {
 }
 
 /** How well this choice carries out the order (section 6 of the design doc). */
-function compliance(ctx: Context, option: Option, here: number, hasTarget: boolean): number {
+function compliance(ctx: Context, option: Option, here: number, target?: Unit): number {
   const progress = ctx.startDistance - here, stay = option.cost === 0;
+  return orderCompliance(ctx, option, here, progress, stay, target) + focusProgress(ctx, option);
+}
+
+/** Under a focused order, ground gained toward the nearest enemy of the singled-out kind. */
+function focusProgress(ctx: Context, option: Option): number {
+  if (!ctx.focus || option.cost === 0) return 0;
+  const marked = ctx.fighters.filter(e => matchesFocus(ctx.s, ctx.focus!, e));
+  if (!marked.length || ctx.unit.weapon.kind === 'ranged') return 0;
+  return (nearest(ctx.start, marked) - nearest(option.pos, marked)) * 3;
+}
+
+function orderCompliance(ctx: Context, option: Option, here: number, progress: number, stay: boolean, target?: Unit): number {
+  const hasTarget = Boolean(target);
   // Only stepping forward past the line counts: a troop already in contact is not pulled back out of it.
   const ahead = (allowance: number) => Math.max(0, Math.min(ctx.startDistance, ctx.lineDistance - allowance) - here);
   switch (ctx.profile) {
@@ -305,6 +342,24 @@ function compliance(ctx: Context, option: Option, here: number, hasTarget: boole
     case 'levantar-escudos': return stay ? 10 : 0;
     case 'arqueiros-disparem': return hasTarget ? 25 : Math.max(0, progress) * 6;
     case 'arqueiros-preparar': return 0;
+    case 'manter-posicao':
+    case 'cessar-fogo':
+    case 'terreno-elevado': return 0;
+    // Gain distance from the enemy until it is out of easy reach; the command range is kept by cohesion.
+    case 'recuar': return (Math.min(here, 8) - Math.min(ctx.startDistance, 8)) * 10;
+    // Go around: strike enemies already busy with allies, to stack the surrounding bonus.
+    case 'flanquear': {
+      if (!target) return progress * 7;
+      const busy = ctx.allies.filter(a => a.weapon.kind === 'melee' && a.morale > 0 && distance(a.pos, target.pos) === 1).length;
+      return progress * 7 + 8 + Math.min(busy, 3) * 9 - (busy === 0 ? 8 : 0);
+    }
+    // Close around the leader and strike whoever comes near.
+    case 'proteger-lider': {
+      const leader = ctx.commander;
+      if (!leader) return 0;
+      const d = distance(option.pos, leader.pos);
+      return -Math.max(0, d - 1) * 8 + (d === 1 ? 10 : 0) + (target ? distance(target.pos, leader.pos) === 1 ? 14 : 4 : 0);
+    }
     case 'comando': {
       // Fight with the platoon, keep it within command range, and never walk out ahead of it.
       // A Líder de Combate stands in the line; the others stay one hex behind.
@@ -316,7 +371,10 @@ function compliance(ctx: Context, option: Option, here: number, hasTarget: boole
   }
 }
 
-/** "Preparar disparo": aim one turn, then shoot the aimed enemy with the bonus. Undefined when there is no shot. */
+/**
+ * "Preparar disparo": aim, keep aiming while the order settles, then shoot the aimed enemy with the bonus.
+ * Undefined when there is no shot.
+ */
 function aimOrShoot(s: BattleState, unit: Unit): ActionResult | undefined {
   const order = unit.order!;
   const aimed = order.aimTargetId ? s.units.find(u => u.id === order.aimTargetId) : undefined;
@@ -324,6 +382,8 @@ function aimOrShoot(s: BattleState, unit: Unit): ActionResult | undefined {
   if (aimed && order.aimRound !== undefined) {
     if (order.aimRound === s.round) return endTurn(s);
     if (hasShot(s, unit, aimed)) {
+      // Shooting before the order settles would waste the aim: the bonus is not there yet.
+      if (!isSettled(s, order)) return endTurn(s);
       if (shotValue(s, unit, aimed, hitChance(s, unit, aimed)) > 0)
         return previewAttack(s, unit, aimed).allowed ? attack(s, aimed.id) : endTurn(s);
       // A friend now locked in melee with the aimed enemy makes the shot not worth it, and aiming again
@@ -336,9 +396,10 @@ function aimOrShoot(s: BattleState, unit: Unit): ActionResult | undefined {
   const closest = nearest(unit.pos, shots);
   let best: Unit | undefined, bestValue = 0;
   for (const enemy of shots) {
-    if (distance(enemy.pos, unit.pos) > closest + 1) continue;
+    const marked = order.focus && matchesFocus(s, order.focus, enemy);
+    if (distance(enemy.pos, unit.pos) > closest + 1 && !marked) continue;
     const chance = Math.min(95, hitChance(s, unit, enemy) + ORDER_BONUS.mira * order.potency);
-    const value = shotValue(s, unit, enemy, chance);
+    const value = shotValue(s, unit, enemy, chance) * focusWeight(order.focus, enemy, s);
     if (value > bestValue) { bestValue = value; best = enemy; }
   }
   return best ? aim(s, best.id) : undefined;
@@ -360,14 +421,19 @@ const armedArchers = (units: Unit[]): Unit[] => units.filter(u => u.weapon.kind 
 
 /**
  * Leader AI, version 1: rules with scores. Reads strength, distance, archers and morale, picks an order
- * per division, and gives one order to everyone when both divisions want the same thing.
+ * per division, and gives one order to everyone when both divisions want the same thing. It never
+ * replaces an order before it settles, so it never stresses its own troops, and never repeats one.
  */
 export function planOrder(s: BattleState, commander: Unit): OrderPlan | undefined {
   const platoons = commandedPlatoons(s, commander);
   const troops = platoons.flatMap(p => platoonTroops(s, p.id)).filter(u => u.id !== commander.id && u.morale > 0);
   const enemies = s.units.filter(u => isAlive(u) && u.team !== commander.team && u.morale > 0);
   if (!troops.length || !enemies.length) return undefined;
-  const ready = (d: Division) => platoons.every(p => p.readyRound[d] <= s.round);
+  const current = (d: Division) => platoons[0]?.lastOrder[d];
+  const ready = (d: Division) => platoons.every(p => {
+    const last = p.lastOrder[d];
+    return !last || s.round >= last.settledRound;
+  });
   const reachable = (d: Division) => troops.some(u => divisionOf(u) === d && distance(u.pos, commander.pos) <= commander.commandRange);
   const warriors = troops.filter(u => divisionOf(u) === 'guerreiros'), archers = troops.filter(u => divisionOf(u) === 'arqueiros');
   const ours = s.units.filter(u => isAlive(u) && u.team === commander.team);
@@ -383,7 +449,7 @@ export function planOrder(s: BattleState, commander: Unit): OrderPlan | undefine
     const arrows = armedArchers(enemies).filter(e => warriors.some(u => distance(u.pos, e.pos) <= e.weapon.range + 2)).length;
     // Enemies that marched this round or the last are coming: contact is near even from afar.
     const marching = enemies.filter(e => (s.movedRound[e.id] ?? 0) >= s.round - 1).length / enemies.length;
-    // An order lasts three rounds, so the leader commits to what the platoon will need when the lines meet.
+    // An order takes a full round to settle, so the leader commits to what the platoon will need when the lines meet.
     const contactSoon = engaged > 0 || dist <= 7 || (marching >= 0.4 && dist <= 11);
     const hold: OrderId = arrows >= 3 && shields >= 0.4 && engaged === 0 ? 'levantar-escudos' : 'linha-defensiva';
     if (contactSoon) warriorWish = power < WEIGHTS.weak ? hold : 'atacar';
@@ -399,8 +465,7 @@ export function planOrder(s: BattleState, commander: Unit): OrderPlan | undefine
   if (archers.length && ready('arqueiros') && reachable('arqueiros')) {
     const range = Math.max(...archers.map(u => u.weapon.range));
     const inReach = enemies.some(e => archers.some(u => distance(u.pos, e.pos) <= range + 2));
-    const platoonOrder = platoons[0]?.lastOrder.guerreiros;
-    const warriorsMode = warriorWish ?? (platoonOrder && platoonOrder.expiresRound >= s.round ? platoonOrder.id : undefined);
+    const warriorsMode = warriorWish ?? current('guerreiros')?.id;
     if (!inReach) archerWish = warriorsMode && ADVANCES.includes(warriorsMode) ? 'avanco-devagar' : undefined;
     else {
       const gap = Math.min(...archers.map(u => nearest(u.pos, enemies.filter(e => e.weapon.kind === 'melee'))));
@@ -412,10 +477,14 @@ export function planOrder(s: BattleState, commander: Unit): OrderPlan | undefine
       });
       const chance = chances.length ? chances.reduce((a, b) => a + b, 0) / chances.length : 0;
       const aimed = Math.min(95, chance + ORDER_BONUS.mira * commander.potency);
-      // Aiming trades a turn of shooting for a bonus on the next two: worth it at long range, while the enemy is still far.
-      archerWish = chances.length && gap >= 6 && 4 * aimed > 6 * chance ? 'arqueiros-preparar' : 'arqueiros-disparem';
+      // Aiming trades two turns of shooting (the order settling) for a bonus afterwards: worth it at long range,
+      // while the enemy is still far. Weighed over five rounds.
+      archerWish = chances.length && gap >= 6 && 3 * aimed > 5 * chance ? 'arqueiros-preparar' : 'arqueiros-disparem';
     }
   }
+  // The troops already follow it: nothing to shout.
+  if (warriorWish && warriorWish === current('guerreiros')?.id) warriorWish = undefined;
+  if (archerWish && archerWish === current('arqueiros')?.id) archerWish = undefined;
 
   const affordable = (id: OrderId) => orderInfo(id).pl <= commander.pl;
   if (warriorWish && warriorWish === archerWish && orderInfo(warriorWish).targets.includes('todos') && affordable(warriorWish)) {

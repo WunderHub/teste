@@ -1,12 +1,13 @@
 import Phaser from 'phaser';
 import {
   getActive, key, distance, neighbors, reachable, moveAp, previewAttack, move, attack, waitTurn, endTurn,
-  isPlayerControlled, tileAt, checkOrder, issueOrder, commandedPlatoons, commanderOf, platoonOf, platoonTroops, divisionOf, orderInfo, ORDERS,
-  type BattleState, type Unit, type Hex, type ActionResult, type BattleEvent, type OrderId, type OrderTarget,
+  isPlayerControlled, isSettled, tileAt, commandedPlatoons, commanderOf, platoonOf, platoonTroops, divisionOf, orderInfo, stressLevel, VOCATIVES,
+  type BattleState, type Unit, type Hex, type ActionResult, type BattleEvent, type OrderTarget,
 } from './game';
 import { createBattle } from './encounters';
 import { performAiAction } from './ai';
-import { CombatUI, type UIView } from './ui';
+import { shoutOrder } from './commands';
+import { CombatUI, ORDER_GROUPS, previewShout, type Composer, type UIView } from './ui';
 
 /** The HUD was laid out for a 1440×900 screen; that size still sets the default zoom. */
 const W = 1440, H = 900, R = 40;
@@ -19,8 +20,8 @@ const SEED = 731;
 const AI_DELAY = 280;
 const DRAG_THRESHOLD = 6;
 const SPEEDS = [1, 2, 4] as const;
-const COLORS = { ally: 0x7caba1, enemy: 0xcb766a, gold: 0xc49a66, bone: 0xe5dec9 };
-const ORDER_TARGETS: OrderTarget[] = ['todos', 'guerreiros', 'arqueiros'];
+const COLORS = { ally: 0x7caba1, enemy: 0xcb766a, gold: 0xc49a66, bone: 0xe5dec9, stress: 0xe58a5c };
+const closedComposer = (): Composer => ({ step: 'closed', text: '' });
 const TEXT_FONT = '"Barlow Condensed", "Arial Narrow", Arial, sans-serif';
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 type Pawn = {
@@ -53,7 +54,7 @@ const worldSize = (s: BattleState) => ({ width: 2 * MARGIN_X + (s.width - 0.5) *
 export class CombatScene extends Phaser.Scene {
   state!: BattleState;
   ui!: CombatUI;
-  view: UIView = { mode: 'move', paused: false, helpOpen: false, busy: false, speed: 2, orderTarget: 'todos', message: 'Clique num hexágono para mover. Clique num inimigo para atacar.' };
+  view: UIView = { mode: 'move', paused: false, helpOpen: false, busy: false, speed: 2, composer: closedComposer(), message: 'Clique num hexágono para mover. Clique num inimigo para atacar.' };
   private world = { width: W, height: H };
   private pawns = new Map<string, Pawn>();
   private grid!: Phaser.GameObjects.Graphics;
@@ -98,9 +99,11 @@ export class CombatScene extends Phaser.Scene {
       onSpeed: () => this.cycleSpeed(),
       onHelp: () => { this.view.helpOpen = true; this.refresh(); },
       onCloseHelp: () => { this.view.helpOpen = false; this.refresh(); this.scheduleAi(); },
-      onOrder: id => this.giveOrder(id),
-      onOrderTarget: target => this.setOrderTarget(target),
-      onOrderHover: id => { this.view.orderHover = id; this.drawGrid(); this.ui.update(this.state, this.view); },
+      onCompose: () => this.openComposer(),
+      onComposeGroup: group => this.chooseGroup(group),
+      onComposeText: text => { this.view.composer.text = text; this.view.composer.warning = undefined; this.drawGrid(); this.ui.update(this.state, this.view); },
+      onComposeSubmit: text => this.submitOrder(text),
+      onComposeCancel: () => this.closeComposer(),
     });
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => this.pointerDown(pointer));
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => this.pointerMove(pointer));
@@ -243,10 +246,11 @@ export class CombatScene extends Phaser.Scene {
       pawn.image.setVisible(true).setPosition(p.x, p.y + 7).setDepth(100 + p.y);
       if (unit.dead) { pawn.image.setTexture('death').setDisplaySize(62, 76).setAlpha(0.65).setDepth(5); pawn.label.setVisible(false); continue; }
       if (unit.order && unit.morale > 0) {
-        // A stale order (no word from the leader) keeps the letter, faded and without the bonus.
+        // Faded while the order settles; a "!" while the troop is under stress.
         // Worn on the shoulder, just above the own sprite: the rows in front never cover that spot.
-        pawn.mark.setText(orderInfo(unit.order.id).mark).setPosition(p.x - 23, p.y - 40).setDepth(101 + p.y).setVisible(true)
-          .setAlpha(unit.order.stale ? 0.5 : 1).setColor(unit.team === 'ally' ? '#e2c99f' : '#e8a596');
+        const stressed = stressLevel(this.state, unit) > 0;
+        pawn.mark.setText(`${orderInfo(unit.order.id).mark}${stressed ? '!' : ''}`).setPosition(p.x - 23, p.y - 40).setDepth(101 + p.y).setVisible(true)
+          .setAlpha(isSettled(this.state, unit.order) || stressed ? 1 : 0.55).setColor(stressed ? '#f0a07c' : unit.team === 'ally' ? '#e2c99f' : '#e8a596');
       }
       pawn.image.setTexture(unit.asset).setDisplaySize(82, 100).setAlpha(unit.morale === 0 ? 0.68 : 1);
       const selected = unit.id === active?.id, hovered = unit.id === this.view.hoveredId, leader = unit.role === 'leader';
@@ -271,9 +275,9 @@ export class CombatScene extends Phaser.Scene {
       this.lastActive = active?.id ?? '';
       const hasShot = active?.weapon.kind === 'ranged' && this.state.units.some(u => u.team !== active.team && previewAttack(this.state, active, u).allowed);
       this.view.mode = hasShot ? 'attack' : 'move';
-      this.hoverHex = undefined; this.view.hoveredId = undefined; this.view.preview = undefined; this.view.orderHover = undefined;
+      this.hoverHex = undefined; this.view.hoveredId = undefined; this.view.preview = undefined; this.view.composer = closedComposer();
       if (active) this.view.message = active.morale === 0 ? `${active.name} está em fuga.`
-        : isPlayerControlled(active) ? `Sua vez · ${active.name}. Dê uma ordem, mova-se ou escolha um alvo.`
+        : isPlayerControlled(active) ? `Sua vez · ${active.name}. Dê ordens (Enter), mova-se ou escolha um alvo.`
         : active.team === 'ally' ? `${active.name} ${active.order ? `cumpre: ${orderInfo(active.order.id).label}`
           : commanderOf(this.state, platoonOf(this.state, active)) ? 'segura a posição…' : 'age por conta própria…'}` : `${active.name} está agindo…`;
       if (active && isPlayerControlled(active) && !this.onScreen(active.pos, -160)) this.focusOn(active, true);
@@ -314,23 +318,60 @@ export class CombatScene extends Phaser.Scene {
           p.x + r * Math.cos(angle + Math.PI / 6), p.y + r * Math.sin(angle + Math.PI / 6));
       }
     }
-    if (!this.view.orderHover || !this.playerCanAct()) return;
-    const check = checkOrder(this.state, leader, this.view.orderHover, this.view.orderTarget);
-    const divisions = check.target === 'todos' ? ['guerreiros', 'arqueiros'] : [check.target];
-    for (const troop of check.troops) this.hex(this.grid, troop.pos, COLORS.gold, check.allowed ? 0.16 : 0.06, check.allowed ? 0.85 : 0.35, 2);
+    const composer = this.view.composer;
+    if (composer.step !== 'text' || !composer.group || !this.playerCanAct()) return;
+    // While the order is written: gold for who would take it, orange for who it would stress, red for who is too far to hear.
+    const check = previewShout(this.state, leader, composer).check;
+    const target = check?.target ?? composer.group, divisions = target === 'todos' ? ['guerreiros', 'arqueiros'] : [target];
+    const changing = new Set(check?.allowed ? check.changing.map(u => u.id) : []), sudden = new Set(check?.allowed ? check.sudden.map(u => u.id) : []);
     for (const platoon of commandedPlatoons(this.state, leader)) for (const troop of platoonTroops(this.state, platoon.id)) {
-      if (divisions.includes(divisionOf(troop)) && distance(troop.pos, leader.pos) > range) this.hex(this.grid, troop.pos, COLORS.enemy, 0.05, 0.45, 1.5);
+      if (troop.id === leader.id || !divisions.includes(divisionOf(troop))) continue;
+      if (distance(troop.pos, leader.pos) > range) this.hex(this.grid, troop.pos, COLORS.enemy, 0.05, 0.45, 1.5);
+      else if (sudden.has(troop.id)) this.hex(this.grid, troop.pos, COLORS.stress, 0.16, 0.9, 2);
+      else if (changing.has(troop.id)) this.hex(this.grid, troop.pos, COLORS.gold, 0.16, 0.85, 2);
+      else this.hex(this.grid, troop.pos, COLORS.gold, 0.05, 0.35, 1.5);
     }
   }
-  private giveOrder(id: OrderId) {
-    if (!this.playerCanAct()) return;
-    void this.execute(() => issueOrder(this.state, id, this.view.orderTarget));
+
+  // Orders: "Dar ordens" opens the choice of who hears it, then a box for the words the leader shouts.
+  private commanding() {
+    const active = getActive(this.state);
+    return this.playerCanAct() && !!active && commandedPlatoons(this.state, active).length > 0;
   }
-  private setOrderTarget(target: OrderTarget) {
-    if (!this.playerCanAct()) return;
-    this.view.orderTarget = target;
-    this.view.message = `As próximas ordens vão para ${target === 'todos' ? 'todo o pelotão' : `os ${target}`}.`;
+  private openComposer() {
+    if (!this.commanding()) return;
+    const composer = this.view.composer;
+    if (composer.step === 'text') { this.ui.focusComposer(); return; }
+    this.view.composer = composer.step === 'group' ? closedComposer() : { step: 'group', text: '' };
+    this.view.message = this.view.composer.step === 'group' ? 'Para quem é a ordem? 1 guerreiros, 2 arqueiros, 3 todos.' : '';
     this.drawGrid(); this.ui.update(this.state, this.view);
+  }
+  private chooseGroup(group: OrderTarget) {
+    if (!this.commanding()) return;
+    // The box starts with the group's name, as the leader would call it.
+    this.view.composer = { step: 'text', group, text: `${VOCATIVES[group]}, ` };
+    this.view.message = 'Escreva a ordem e aperte Enter para gritar.';
+    this.drawGrid(); this.ui.update(this.state, this.view);
+  }
+  private closeComposer() {
+    if (this.view.composer.step === 'closed') return;
+    this.view.composer = closedComposer();
+    this.view.message = '';
+    this.drawGrid(); this.ui.update(this.state, this.view);
+  }
+  private submitOrder(text: string) {
+    const group = this.view.composer.group;
+    if (!this.commanding() || !group) return;
+    const result = shoutOrder(this.state, text, group);
+    if (!result.ok) {
+      // The troops did not follow: the box stays open with their answer, and no PL was spent.
+      this.view.composer = { ...this.view.composer, text, warning: result.message };
+      this.view.message = result.message;
+      this.ui.update(this.state, this.view);
+      return;
+    }
+    this.view.composer = closedComposer();
+    void this.execute(() => result);
   }
   private playerCanAct() {
     const active = getActive(this.state);
@@ -416,7 +457,13 @@ export class CombatScene extends Phaser.Scene {
     if (event.ctrlKey || event.altKey || event.metaKey) return;
     const target = event.target as HTMLElement;
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
-    if (event.code === 'Escape') { event.preventDefault(); if (this.view.helpOpen) { this.view.helpOpen = false; this.refresh(); this.scheduleAi(); } else this.togglePause(); return; }
+    if (event.code === 'Escape') {
+      event.preventDefault();
+      if (this.view.helpOpen) { this.view.helpOpen = false; this.refresh(); this.scheduleAi(); }
+      else if (this.view.composer.step !== 'closed') this.closeComposer();
+      else this.togglePause();
+      return;
+    }
     if (event.code === 'KeyG') { this.showGrid = !this.showGrid; this.drawGrid(); return; }
     const pan: Record<string, [number, number]> = { ArrowLeft: [-160, 0], ArrowRight: [160, 0], ArrowUp: [0, -160], ArrowDown: [0, 160] };
     if (pan[event.code]) { event.preventDefault(); this.panBy(...pan[event.code]); return; }
@@ -425,12 +472,16 @@ export class CombatScene extends Phaser.Scene {
     if (event.code === 'KeyC') { this.focusOn(getActive(this.state), true); return; }
     if (event.code === 'KeyV') { this.cycleSpeed(); return; }
     if (!this.playerCanAct()) return;
+    if (event.code === 'Enter' || event.code === 'NumpadEnter') { event.preventDefault(); this.openComposer(); return; }
+    // Choosing who hears the order: 1 guerreiros, 2 arqueiros, 3 todos.
+    const digit = /^(?:Digit|Numpad)([1-3])$/.exec(event.code);
+    if (this.view.composer.step === 'group') {
+      if (digit) { event.preventDefault(); this.chooseGroup(ORDER_GROUPS[Number(digit[1]) - 1]); }
+      return;
+    }
     if (event.code === 'Digit1') { this.view.mode = 'move'; this.refresh(); }
     if (event.code === 'Digit2') { this.view.mode = 'attack'; this.refresh(); }
     if (event.code === 'KeyW') { event.preventDefault(); void this.execute(() => waitTurn(this.state)); }
-    const digit = /^(?:Digit|Numpad)([3-9])$/.exec(event.code);
-    if (digit) { event.preventDefault(); this.giveOrder(ORDERS[Number(digit[1]) - 3].id); }
-    if (event.code === 'KeyT') { event.preventDefault(); this.setOrderTarget(ORDER_TARGETS[(ORDER_TARGETS.indexOf(this.view.orderTarget) + 1) % ORDER_TARGETS.length]); }
     if (event.code === 'Space' && target.tagName !== 'BUTTON') { event.preventDefault(); void this.execute(() => endTurn(this.state)); }
   }
   private cycleSpeed() {
@@ -454,7 +505,7 @@ export class CombatScene extends Phaser.Scene {
     this.transient.clear();
     for (const pawn of this.pawns.values()) pawn.image.clearTint();
     this.state = createBattle(SEED, 'campo-aberto'); this.lastActive = ''; this.lastActor = '';
-    this.view = { mode: 'move', paused: false, helpOpen: false, busy: false, speed: this.view.speed, orderTarget: this.view.orderTarget,
+    this.view = { mode: 'move', paused: false, helpOpen: false, busy: false, speed: this.view.speed, composer: closedComposer(),
       message: `Uma nova tentativa. Conduza ${this.playerLeader()?.name ?? 'o pelotão'} à vitória.` };
     this.pointerTip.setVisible(false); this.focusOn(this.playerLeader()); this.refresh(); this.scheduleAi();
   }
@@ -463,7 +514,7 @@ export class CombatScene extends Phaser.Scene {
     const generation = this.generation, actor = getActive(this.state)?.id ?? '', result = action();
     this.view.message = result.message; this.pointerTip.setVisible(false);
     if (!result.ok) { this.ui.update(this.state, this.view); return; }
-    this.lastActor = actor;
+    this.lastActor = actor; this.view.composer = closedComposer();
     this.view.busy = true; this.grid.clear(); this.pathGraphics.clear(); this.ui.update(this.state, this.view);
     for (const event of result.events) { if (generation !== this.generation) return; await this.animateEvent(event); }
     if (generation !== this.generation) return;
@@ -474,7 +525,7 @@ export class CombatScene extends Phaser.Scene {
     if (event.type === 'order' && pawn && event.order) {
       const leader = this.state.units.find(u => u.id === event.unitId)!;
       if (!this.onScreen(leader.pos, 120)) return;
-      await this.shout(leader, orderInfo(event.order).label);
+      await this.shout(leader, event.words ?? orderInfo(event.order).call);
       return;
     }
     if (event.type === 'move' && pawn && event.to) {
@@ -510,7 +561,9 @@ export class CombatScene extends Phaser.Scene {
   private shout(leader: Unit, words: string) {
     const p = hexToWorld(leader.pos), color = leader.team === 'ally' ? '#e2c99f' : '#efb3a3';
     const ring = this.add.graphics().setDepth(3), sweep = { radius: 30, alpha: 0.7 };
-    const text = this.add.text(p.x, p.y - 138, words, { fontFamily: TEXT_FONT, fontSize: '24px', fontStyle: 'bold', color, stroke: '#151b19', strokeThickness: 5 }).setOrigin(0.5).setDepth(1600);
+    // The player's own words, wrapped so a long shout stays over the leader.
+    const text = this.add.text(p.x, p.y - 138, words, { fontFamily: TEXT_FONT, fontSize: '24px', fontStyle: 'bold', color, stroke: '#151b19', strokeThickness: 5,
+      align: 'center', wordWrap: { width: 440 } }).setOrigin(0.5, 1).setDepth(1600);
     this.transient.add(ring); this.transient.add(text);
     const radius = Math.max(60, leader.commandRange * DX);
     this.tweens.add({ targets: sweep, radius, alpha: 0, duration: 650, ease: 'Sine.easeOut',

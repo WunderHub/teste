@@ -9,7 +9,10 @@ export type Division = 'guerreiros' | 'arqueiros';
 export type UnitAsset = 'iria' | 'tome' | 'nara' | 'raider' | 'husk' | 'captain' | 'warlord';
 export type EncounterId = 'emboscada' | 'campo-aberto';
 export type OrderId = 'avanco-devagar' | 'avanco-rapido' | 'linha-defensiva' | 'levantar-escudos'
-  | 'arqueiros-disparem' | 'arqueiros-preparar' | 'atacar';
+  | 'arqueiros-disparem' | 'arqueiros-preparar' | 'atacar'
+  | 'manter-posicao' | 'recuar' | 'flanquear' | 'proteger-lider' | 'cessar-fogo' | 'terreno-elevado';
+/** Who an attacking order singles out, as in "Ataquem o líder!". */
+export type OrderFocus = 'lider' | 'arqueiros' | 'feridos';
 /** Who an order goes to: one division of the platoon, or both. */
 export type OrderTarget = 'todos' | Division;
 export interface Tile extends Hex {
@@ -58,19 +61,31 @@ export interface Unit {
   potency: number;
   /** The order this troop follows. Without one it holds position. */
   order?: TroopOrder;
+  /** Estresse from an order replaced before it settled: a penalty to hit and to defense until the troop's next turn ends. */
+  stress?: Stress;
 }
 export interface TroopOrder {
   id: OrderId;
-  /** Last round the order runs. The division's cooldown ends with it. */
-  expiresRound: number;
+  /** Round in which the order was shouted. */
+  givenRound: number;
+  /** First round in which the order has settled: from then on it gives its bonus and can be replaced without stress. */
+  settledRound: number;
   potency: number;
-  /** Out of the commander's range when the order ran out: the troop keeps following it, without the bonus. */
-  stale: boolean;
+  /** Sudden orders in a row that led to this one. Each one stacks a level of stress. */
+  chain: number;
+  focus?: OrderFocus;
   /** Atacar!: the first-attack bonus is spent. */
   strikeUsed: boolean;
   /** Arqueiros, preparar disparo!: the aimed target and the round the aim was taken. */
   aimTargetId?: string; aimRound?: number;
 }
+export interface Stress {
+  level: number;
+  /** The round of the troop's next turn. The stress ends when that turn does. */
+  round: number;
+}
+/** What a commander last shouted to a division. */
+export interface ShoutedOrder { id: OrderId; givenRound: number; settledRound: number; focus?: OrderFocus; words: string }
 /** A leader and the troops assigned to them. */
 export interface Platoon {
   id: string; team: Team; name: string;
@@ -78,10 +93,8 @@ export interface Platoon {
   leaderId: string | null;
   /** Who gives the orders: the leader, or the interim commander once no leader is left on the side. */
   commanderId: string | null;
-  /** First round in which each division can take a new order. */
-  readyRound: Record<Division, number>;
-  /** The latest order given to each division. */
-  lastOrder: Partial<Record<Division, { id: OrderId; expiresRound: number }>>;
+  /** The latest order shouted to each division. Orders last until they are replaced. */
+  lastOrder: Partial<Record<Division, ShoutedOrder>>;
 }
 export type PlatoonSetup = Pick<Platoon, 'id' | 'team' | 'name' | 'leaderId'>;
 export interface BattleState {
@@ -105,6 +118,8 @@ export interface BattleState {
 export interface BattleEvent {
   type: 'move' | 'attack' | 'death' | 'flee' | 'turn' | 'info' | 'order';
   unitId?: string; targetId?: string; from?: Hex; to?: Hex; order?: OrderId;
+  /** The words a commander shouted with an order. */
+  words?: string;
   hit?: boolean; damage?: number; message?: string;
   armorDamage?: number; location?: 'head' | 'body';
   /** A missed arrow that struck one of the shooter's own side instead; `from` is then the hex of the enemy it missed. */
@@ -207,25 +222,37 @@ export const strayCandidates = (s: BattleState, unit: Unit, target: Unit): Unit[
 export const strayChance = (s: BattleState, unit: Unit, target: Unit): number =>
   Math.min(STRAY_SHOT.max, STRAY_SHOT.perFriend * strayCandidates(s, unit, target).length);
 
-/** The order a troop follows, if it still carries its bonus. */
-const bonusOrder = (u: Unit, id: OrderId): TroopOrder | undefined =>
-  u.order && !u.order.stale && u.order.id === id ? u.order : undefined;
+/** An order settles once it has stood for one full round without being replaced. */
+export const isSettled = (s: BattleState, order: TroopOrder): boolean => s.round >= order.settledRound;
+/** The order a troop follows, once it has settled and so gives its bonus. */
+const bonusOrder = (s: BattleState, u: Unit, id: OrderId): TroopOrder | undefined =>
+  u.order && u.order.id === id && isSettled(s, u.order) ? u.order : undefined;
 /** Defense granted by the target's order: the defensive line against melee, raised shields against both. */
-export function orderDefense(target: Unit, melee: boolean): number {
-  const line = bonusOrder(target, 'linha-defensiva'), shields = bonusOrder(target, 'levantar-escudos');
+export function orderDefense(s: BattleState, target: Unit, melee: boolean): number {
+  const line = bonusOrder(s, target, 'linha-defensiva'), shields = bonusOrder(s, target, 'levantar-escudos');
   return (line && melee ? ORDER_BONUS.linha * line.potency : 0) + (shields && target.shield ? ORDER_BONUS.escudos * shields.potency : 0);
 }
 /** Attack granted by the attacker's order. Reaction strikes never use it. */
 export function orderAttack(s: BattleState, unit: Unit, target: Unit, reaction = false): number {
   if (reaction) return 0;
-  const charge = bonusOrder(unit, 'atacar'), aim = bonusOrder(unit, 'arqueiros-preparar');
+  const charge = bonusOrder(s, unit, 'atacar'), aim = bonusOrder(s, unit, 'arqueiros-preparar');
   const aimed = aim && unit.weapon.kind === 'ranged' && aim.aimTargetId === target.id && aim.aimRound !== undefined && aim.aimRound < s.round;
   return (charge && !charge.strikeUsed ? ORDER_BONUS.atacar * charge.potency : 0) + (aimed ? ORDER_BONUS.mira * aim.potency : 0);
 }
+/** Estresse level right now: it lasts until the end of the troop's next turn. */
+export function stressLevel(s: BattleState, u: Unit): number {
+  const stress = u.stress;
+  if (!stress || s.round > stress.round) return 0;
+  if (s.round < stress.round) return stress.level;
+  // The round of its next turn: the stress holds until that turn is over.
+  return s.activatedRound[u.id] === stress.round && s.queue[0] !== u.id ? 0 : stress.level;
+}
+/** Points of attack and of defense that the troop's stress takes away. */
+export const stressPenalty = (s: BattleState, u: Unit): number => stressLevel(s, u) * STRESS.perLevel;
 export function hitChance(s: BattleState, unit: Unit, target: Unit, reaction = false): number {
   const melee = unit.weapon.kind === 'melee';
-  const attackSkill = (melee ? unit.meleeSkill : unit.rangedSkill) * moraleFactor(unit) + orderAttack(s, unit, target, reaction);
-  let defense = (melee ? target.meleeDefense : target.rangedDefense) * moraleFactor(target) + orderDefense(target, melee);
+  const attackSkill = (melee ? unit.meleeSkill : unit.rangedSkill) * moraleFactor(unit) + orderAttack(s, unit, target, reaction) - stressPenalty(s, unit);
+  let defense = (melee ? target.meleeDefense : target.rangedDefense) * moraleFactor(target) + orderDefense(s, target, melee) - stressPenalty(s, target);
   if (defense > 50) defense = 50 + (defense - 50) / 2;
   const surrounding = melee ? Math.max(0, s.units.filter(v => alive(v) && v.team === unit.team
     && v.weapon.kind === 'melee' && v.morale > 0 && distance(v.pos, target.pos) === 1).length - 1) * 5 : 0;
@@ -425,23 +452,11 @@ function activate(s: BattleState, events: BattleEvent[]): void {
   emit(s, events, { type: 'turn', unitId: unit.id, message: `Turno de ${unit.name}.` });
 }
 
-/**
- * At the start of a round, orders that ran out end for troops within their commander's range.
- * Troops out of range get no news: they keep following the order, without its bonus.
- */
-function expireOrders(s: BattleState): void {
-  for (const unit of s.units) {
-    if (!unit.order || !alive(unit) || unit.order.expiresRound >= s.round) continue;
-    const commander = commanderOf(s, platoonOf(s, unit));
-    if (commander && distance(commander.pos, unit.pos) <= commander.commandRange) delete unit.order;
-    else unit.order.stale = true;
-  }
-}
-
 function startRound(s: BattleState, events: BattleEvent[]): void {
   if (checkOutcome(s, events)) return;
   s.round++;
-  expireOrders(s);
+  // Stress from earlier rounds is over.
+  for (const unit of s.units) if (unit.stress && unit.stress.round < s.round) delete unit.stress;
   // A side whose commanders were all fleeing when the last leader fell gets a commander once someone holds.
   for (const team of ['ally', 'enemy'] as const) appointInterim(s, team, { q: 0, r: 0 }, events);
   const initiative = (u: Unit): number => Math.max(0, u.initiative - u.fatigue) * (s.waitPenaltyNextRound[u.id] ? 0.75 : 1) - (u.morale === 0 ? 1000 : 0);
@@ -515,7 +530,7 @@ export function attack(s: BattleState, targetId: string): ActionResult {
   if (unit.weapon.ammo !== undefined) unit.weapon.ammo--;
   const events: BattleEvent[] = [];
   resolveStrike(s, unit, target, events);
-  if (unit.order?.id === 'atacar' && !unit.order.stale) unit.order.strikeUsed = true;
+  if (unit.order?.id === 'atacar' && isSettled(s, unit.order)) unit.order.strikeUsed = true;
   normalizeQueue(s, events, unit.id);
   return done(events);
 }
@@ -633,75 +648,139 @@ export interface OrderInfo {
   /** The letter shown over troops that follow this order. */
   mark: string;
   pl: number; targets: OrderTarget[]; summary: string;
+  /** What a commander shouts after naming the group, as in "Arqueiros, preparar disparo!". */
+  call: string;
+  /** Other ways to say it; the order parser understands all of them. */
+  examples: string[];
+  /** Whether the order singles out targets when told to, as in "Ataquem o líder!". */
+  focus: boolean;
 }
-/** Bonuses before the commander's potency. */
+/** Bonuses before the commander's potency. They only count once the order has settled. */
 export const ORDER_BONUS = { linha: 10, escudos: 8, atacar: 10, mira: 15 };
-/** An order runs for the round it is given plus the next two; the division's cooldown ends with it. */
-export const ORDER_ROUNDS = 3;
+/** Full rounds an order has to stand, without being replaced, to settle. */
+export const ORDER_SETTLE_ROUNDS = 1;
+/** Estresse: each level takes this much attack and defense away, up to the cap. */
+export const STRESS = { perLevel: 5, max: 4 };
 const EVERYONE: OrderTarget[] = ['todos', 'guerreiros', 'arqueiros'];
+const WARRIORS: OrderTarget[] = ['todos', 'guerreiros'];
 export const ORDERS: readonly OrderInfo[] = [
-  { id: 'avanco-devagar', label: 'Avanço devagar!', mark: 'D', pl: 2, targets: EVERYONE,
+  { id: 'avanco-devagar', label: 'Avanço devagar', mark: 'D', pl: 2, targets: EVERYONE, focus: false, call: 'avancem devagar!',
+    examples: ['Avancem!', 'Em frente, com cuidado!', 'Marchem!'],
     summary: 'Avançam até 2 hexágonos por turno, sem sair da linha e guardando PA para atacar.' },
-  { id: 'avanco-rapido', label: 'Avanço rápido!', mark: 'R', pl: 3, targets: EVERYONE,
+  { id: 'avanco-rapido', label: 'Avanço rápido', mark: 'R', pl: 3, targets: EVERYONE, focus: true, call: 'avancem rápido!',
+    examples: ['Corram!', 'Depressa, avancem!', 'Avancem a toda velocidade!'],
     summary: 'Gastam os PA para fechar a distância. A formação fica solta.' },
-  { id: 'linha-defensiva', label: 'Formar linha defensiva!', mark: 'L', pl: 3, targets: ['todos', 'guerreiros'],
+  { id: 'linha-defensiva', label: 'Formar linha defensiva', mark: 'L', pl: 3, targets: WARRIORS, focus: false, call: 'formar linha defensiva!',
+    examples: ['Segurem a linha!', 'Em formação!', 'Defendam!'],
     summary: `+${ORDER_BONUS.linha} de defesa corpo a corpo. Seguram a linha e não perseguem.` },
-  { id: 'levantar-escudos', label: 'Levantar escudos!', mark: 'E', pl: 4, targets: ['todos', 'guerreiros'],
+  { id: 'levantar-escudos', label: 'Levantar escudos', mark: 'E', pl: 4, targets: WARRIORS, focus: false, call: 'levantar escudos!',
+    examples: ['Escudos!', 'Parede de escudos!', 'Cubram-se!'],
     summary: `+${ORDER_BONUS.escudos} de defesa corpo a corpo e à distância para quem tem escudo. Andam no máximo 1 hexágono.` },
-  { id: 'arqueiros-disparem', label: 'Arqueiros, disparem!', mark: 'T', pl: 2, targets: ['arqueiros'],
+  { id: 'arqueiros-disparem', label: 'Disparar', mark: 'T', pl: 2, targets: ['arqueiros'], focus: true, call: 'disparem!',
+    examples: ['Fogo!', 'Atirem à vontade!', 'Soltem as flechas!'],
     summary: 'Atiram por cima da linha no alvo que mais vale a flecha. Seguram o tiro se o risco de acertar um aliado não compensar.' },
-  { id: 'arqueiros-preparar', label: 'Arqueiros, preparar disparo!', mark: 'M', pl: 3, targets: ['arqueiros'],
-    summary: `Miram um turno sem atirar. Depois, +${ORDER_BONUS.mira} de ataque à distância no alvo mirado. Andar perde a mira.` },
-  { id: 'atacar', label: 'Atacar!', mark: 'A', pl: 4, targets: EVERYONE,
-    summary: `Partem para cima do inimigo. +${ORDER_BONUS.atacar} no primeiro ataque de cada tropa durante a ordem.` },
+  { id: 'arqueiros-preparar', label: 'Preparar disparo', mark: 'M', pl: 3, targets: ['arqueiros'], focus: true, call: 'preparar disparo!',
+    examples: ['Mirem!', 'Apontar!', 'Mirem no líder deles!'],
+    summary: `Ficam mirando sem atirar enquanto a ordem assenta. Depois, +${ORDER_BONUS.mira} de ataque à distância no alvo mirado. Andar perde a mira.` },
+  { id: 'atacar', label: 'Atacar', mark: 'A', pl: 4, targets: EVERYONE, focus: true, call: 'ataquem!',
+    examples: ['Carga!', 'Pra cima deles!', 'Matem o líder!'],
+    summary: `Partem para cima do inimigo. +${ORDER_BONUS.atacar} no primeiro ataque de cada tropa depois que a ordem assenta.` },
+  { id: 'manter-posicao', label: 'Manter posição', mark: 'S', pl: 1, targets: EVERYONE, focus: false, call: 'mantenham a posição!',
+    examples: ['Alto!', 'Fiquem onde estão!', 'Não avancem!'],
+    summary: 'Param onde estão e atacam só quem chegar perto. Arqueiros atiram no que estiver ao alcance.' },
+  { id: 'recuar', label: 'Recuar', mark: 'V', pl: 3, targets: EVERYONE, focus: false, call: 'recuem!',
+    examples: ['Para trás!', 'Retirada!', 'Afastem-se!'],
+    summary: 'Abrem distância do inimigo sem sair do alcance do líder, evitando dar ataques grátis.' },
+  { id: 'flanquear', label: 'Flanquear', mark: 'F', pl: 4, targets: WARRIORS, focus: true, call: 'pelos flancos!',
+    examples: ['Flanqueiem!', 'Cerquem eles!', 'Ataquem pelo flanco!'],
+    summary: 'Contornam a linha e atacam quem já está ocupado com um aliado, para somar o bônus de cerco.' },
+  { id: 'proteger-lider', label: 'Proteger o líder', mark: 'P', pl: 3, targets: EVERYONE, focus: false, call: 'protejam o líder!',
+    examples: ['Comigo!', 'A mim!', 'Reagrupem!'],
+    summary: 'Fecham em volta do líder e batem em quem chegar perto dele.' },
+  { id: 'cessar-fogo', label: 'Cessar fogo', mark: 'C', pl: 1, targets: ['arqueiros'], focus: false, call: 'cessar fogo!',
+    examples: ['Segurem o fogo!', 'Não atirem!', 'Parem de atirar!'],
+    summary: 'Arqueiros param de atirar e ficam onde estão, por exemplo quando os aliados já estão colados no inimigo.' },
+  { id: 'terreno-elevado', label: 'Procurar terreno elevado', mark: 'H', pl: 3, targets: EVERYONE, focus: false, call: 'procurem terreno elevado!',
+    examples: ['Subam a colina!', 'Tomem o morro!', 'Ocupem a parte alta!'],
+    summary: 'Sobem para o ponto mais alto ao alcance. Só vale em campos com relevo, que ainda não existem.' },
 ];
 export const orderInfo = (id: OrderId): OrderInfo => ORDERS.find(order => order.id === id)!;
 export const TARGET_LABELS: Record<OrderTarget, string> = { todos: 'todos', guerreiros: 'guerreiros', arqueiros: 'arqueiros' };
+/** How a commander names the group at the start of a shout. */
+export const VOCATIVES: Record<OrderTarget, string> = { todos: 'Todos', guerreiros: 'Guerreiros', arqueiros: 'Arqueiros' };
 const divisionsOf = (target: OrderTarget): Division[] => target === 'todos' ? ['guerreiros', 'arqueiros'] : [target];
+/** The canonical shout of an order for a group, as the AI leaders say it. */
+export const orderCall = (id: OrderId, target: OrderTarget): string => `${VOCATIVES[target]}, ${orderInfo(id).call}`;
 
 export interface OrderCheck {
   allowed: boolean; reason: string;
   /** The target the order would go to: archer orders always go to the archers. */
   target: OrderTarget;
-  /** Troops in range that would take the order. */
+  /** Troops in range that would hear the order. */
   troops: Unit[];
+  /** Those of them whose order changes: the rest already follow it. */
+  changing: Unit[];
+  /** Those whose current order has not settled yet: replacing it stresses them. */
+  sudden: Unit[];
   cost: number;
 }
 /** Whether this unit can give the order now, and who would hear it. */
-export function checkOrder(s: BattleState, unit: Unit, id: OrderId, wanted: OrderTarget): OrderCheck {
+export function checkOrder(s: BattleState, unit: Unit, id: OrderId, wanted: OrderTarget, focus?: OrderFocus): OrderCheck {
   const info = orderInfo(id), target = info.targets.length === 1 ? info.targets[0] : wanted;
   const platoons = commandedPlatoons(s, unit), divisions = divisionsOf(target);
+  const want = info.focus ? focus : undefined;
   const troops = platoons.flatMap(p => platoonTroops(s, p.id)).filter(u =>
     u.id !== unit.id && divisions.includes(divisionOf(u)) && distance(u.pos, unit.pos) <= unit.commandRange);
-  const waiting = divisions.map(d => ({ d, round: Math.max(0, ...platoons.map(p => p.readyRound[d])) })).filter(w => w.round > s.round);
+  const changing = troops.filter(u => u.order?.id !== id || u.order.focus !== want);
+  const sudden = changing.filter(u => u.order && u.order.id !== id && !isSettled(s, u.order));
   let reason = '';
   if (s.outcome !== 'ongoing') reason = 'O combate terminou.';
   else if (!alive(unit) || !platoons.length) reason = 'Só quem comanda um pelotão dá ordens.';
   else if (unit.morale === 0) reason = 'Em fuga: não consegue comandar.';
-  else if (!info.targets.includes(target)) reason = `Esta ordem não vale para ${TARGET_LABELS[target]}.`;
-  else if (waiting.length) reason = new Set(waiting.map(w => w.round)).size === 1
-    ? `Recarga: ${waiting.map(w => TARGET_LABELS[w.d]).join(' e ')} livres na rodada ${waiting[0].round}.`
-    : `Recarga: ${waiting.map(w => `${TARGET_LABELS[w.d]} livres na rodada ${w.round}`).join(', ')}.`;
-  else if (unit.pl < info.pl) reason = 'Pontos de liderança insuficientes.';
-  else if (!troops.length) reason = 'Nenhuma tropa desta divisão no alcance de comando.';
-  return { allowed: !reason, reason, target, troops, cost: info.pl };
+  else if (!info.targets.includes(target)) reason = target === 'arqueiros' ? 'Essa ordem não vale para os arqueiros.'
+    : `Os ${TARGET_LABELS[target]} não têm arcos: essa ordem é para os arqueiros.`;
+  // No relief on the field yet: every hex sits at the same height.
+  else if (id === 'terreno-elevado') reason = 'Este campo é plano: não há terreno elevado para ocupar.';
+  else if (!troops.length) reason = 'Nenhuma tropa desse grupo no alcance de comando.';
+  else if (!changing.length) reason = `Os ${TARGET_LABELS[target]} no alcance já cumprem essa ordem.`;
+  else if (unit.pl < info.pl) reason = `Pontos de liderança insuficientes: a ordem custa ${info.pl} e restam ${unit.pl}.`;
+  return { allowed: !reason, reason, target, troops, changing, sudden, cost: info.pl };
 }
-/** The active commander gives an order. It costs PL, not PA, and starts the division's cooldown. */
-export function issueOrder(s: BattleState, id: OrderId, wanted: OrderTarget = 'todos'): ActionResult {
+/**
+ * The active commander gives an order. It costs PL, not PA, and lasts until it is replaced. It gives its bonus
+ * once it has settled; replacing an order that has not settled yet stresses the troops that were following it.
+ */
+export function issueOrder(s: BattleState, id: OrderId, wanted: OrderTarget = 'todos',
+  options: { focus?: OrderFocus; words?: string } = {}): ActionResult {
   const unit = getActive(s);
   if (!unit) return reject('Não há um turno ativo.');
-  const check = checkOrder(s, unit, id, wanted);
+  const check = checkOrder(s, unit, id, wanted, options.focus);
   if (!check.allowed) return reject(check.reason);
-  const info = orderInfo(id), expiresRound = s.round + ORDER_ROUNDS - 1;
+  const info = orderInfo(id), focus = info.focus ? options.focus : undefined;
+  const words = options.words?.trim() || orderCall(id, check.target);
+  const settledRound = s.round + 1 + ORDER_SETTLE_ROUNDS;
   unit.pl -= info.pl;
   for (const platoon of commandedPlatoons(s, unit)) for (const division of divisionsOf(check.target)) {
-    platoon.readyRound[division] = expiresRound + 1;
-    platoon.lastOrder[division] = { id, expiresRound };
+    const last = platoon.lastOrder[division];
+    platoon.lastOrder[division] = last?.id === id ? { ...last, focus, words } : { id, givenRound: s.round, settledRound, focus, words };
   }
-  for (const troop of check.troops) troop.order = { id, expiresRound, potency: unit.potency, stale: false, strikeUsed: false };
+  let stressed = 0;
+  for (const troop of check.changing) {
+    const old = troop.order;
+    // Same order, new target: the troops adjust without starting over.
+    if (old?.id === id) { old.focus = focus; delete old.aimTargetId; delete old.aimRound; continue; }
+    const sudden = Boolean(old && !isSettled(s, old)), chain = sudden ? old!.chain + 1 : 0;
+    troop.order = { id, givenRound: s.round, settledRound, potency: unit.potency, chain, strikeUsed: false, ...(focus ? { focus } : {}) };
+    if (sudden) {
+      // The stress lasts through the troop's next turn: this round if it has not acted yet, otherwise the next one.
+      troop.stress = { level: Math.min(STRESS.max, chain), round: s.activatedRound[troop.id] === s.round ? s.round + 1 : s.round };
+      stressed++;
+    }
+  }
   const events: BattleEvent[] = [];
-  emit(s, events, { type: 'order', unitId: unit.id, order: id,
-    message: `${unit.name}: "${info.label}" para ${TARGET_LABELS[check.target]} (${check.troops.length} ${check.troops.length === 1 ? 'tropa' : 'tropas'}).` });
+  const heard = `${check.troops.length} ${check.troops.length === 1 ? 'tropa' : 'tropas'}`;
+  emit(s, events, { type: 'order', unitId: unit.id, order: id, words,
+    message: `${unit.name}: "${words}" (${heard}${stressed ? `, ${stressed} sob estresse` : ''}).` });
   return done(events);
 }
 /** An archer under "preparar disparo" spends the turn aiming at one enemy in its line of fire. */
@@ -755,8 +834,7 @@ export interface BattleSetup {
 }
 export function startBattle(seed: number, setup: BattleSetup): BattleState {
   const { encounter, width, height, tiles, units } = setup;
-  const platoons: Platoon[] = (setup.platoons ?? []).map(p => ({ ...p, commanderId: p.leaderId,
-    readyRound: { guerreiros: 0, arqueiros: 0 }, lastOrder: {} }));
+  const platoons: Platoon[] = (setup.platoons ?? []).map(p => ({ ...p, commanderId: p.leaderId, lastOrder: {} }));
   if (tiles.length !== width * height || tiles.some((t, i) => t.q !== i % width || t.r !== Math.floor(i / width)))
     throw new Error('Tiles must cover the board row by row.');
   const normalizedSeed = seed >>> 0 || 1;

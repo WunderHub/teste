@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   aim, attack, attributeScore, checkOrder, distance, divisionOf, endTurn, getActive, hitChance, INTERIM_COMMAND,
-  isPlayerControlled, issueOrder, key, makeLeader, makeTiles, makeUnit, move, neighbors, ORDER_BONUS, ORDERS,
-  performSimpleAiAction, platoonTroops, previewAttack, reachable, startBattle, tileAt, waitTurn,
+  isPlayerControlled, issueOrder, key, makeLeader, makeTiles, makeUnit, move, neighbors, ORDER_BONUS, orderCall, orderDefense, ORDERS,
+  performSimpleAiAction, platoonTroops, previewAttack, reachable, startBattle, STRESS, stressLevel, tileAt, waitTurn,
   type BattleState, type OrderId, type Unit,
 } from './game';
 import { BOARD_HEIGHT, BOARD_WIDTH, createBattle, FIELD_HEIGHT, FIELD_WIDTH } from './encounters';
 import { performAiAction } from './ai';
+import { parseOrder, resolveGroup, shoutOrder } from './commands';
 
 /** A clear arena isolates rule interactions from the encounter's level design. */
 function duel(seed = 1, archer = false) {
@@ -489,12 +490,17 @@ describe('leaders, platoons and the field battle', () => {
     const run = () => {
       const state = createBattle(seed, 'campo-aberto');
       let actions = 0;
+      let orders = 0;
       while (state.outcome === 'ongoing' && actions < 3000) {
-        expect(performAiAction(state).ok).toBe(true);
+        const result = performAiAction(state);
+        expect(result.ok).toBe(true);
+        // AI leaders let every order settle before replacing it: they never stress their own troops.
+        for (const event of result.events.filter(e => e.type === 'order')) { orders++; expect(event.message).not.toMatch(/estresse/); }
         actions++;
       }
       expect(state.outcome).not.toBe('ongoing');
       expect(actions).toBeLessThan(3000);
+      expect(orders).toBeGreaterThan(2);
       return state;
     };
     expect(run()).toEqual(run());
@@ -509,6 +515,11 @@ describe('orders and the command tab', () => {
     const troops = platoonTroops(state, leader.platoonId!);
     return { state, leader, troops, warriors: troops.filter(u => divisionOf(u) === 'guerreiros'), archers: troops.filter(u => divisionOf(u) === 'arqueiros') };
   };
+  /** Starts the next round with the leader acting first, PL full. */
+  const nextRound = (state: BattleState, leader: Unit) => {
+    skipTo(state, state.round + 1);
+    setActive(state, leader); leader.pl = leader.maxPl;
+  };
 
   it('Duarte acts first and every troop of the pelotão starts inside his command range', () => {
     const state = createBattle(1, 'campo-aberto');
@@ -519,31 +530,105 @@ describe('orders and the command tab', () => {
     expect(checkOrder(state, leader, 'atacar', 'todos')).toMatchObject({ allowed: true, cost: 4 });
   });
 
-  it('an order costs PL, reaches the chosen division in range and lasts three rounds', () => {
+  it('an order costs PL, reaches the chosen division in range and settles after one full round', () => {
     const { state, leader, warriors, archers } = field();
     const result = issueOrder(state, 'linha-defensiva', 'guerreiros');
     expect(result.ok).toBe(true);
-    expect(result.events[0]).toMatchObject({ type: 'order', unitId: 'duarte', order: 'linha-defensiva' });
-    expect(result.message).toBe('Duarte: "Formar linha defensiva!" para guerreiros (14 tropas).');
+    expect(result.events[0]).toMatchObject({ type: 'order', unitId: 'duarte', order: 'linha-defensiva', words: 'Guerreiros, formar linha defensiva!' });
+    expect(result.message).toBe('Duarte: "Guerreiros, formar linha defensiva!" (14 tropas).');
     expect(leader.pl).toBe(3);
     expect(leader.ap).toBe(leader.maxAp);
-    expect(warriors.every(u => u.order?.id === 'linha-defensiva' && u.order.expiresRound === state.round + 2)).toBe(true);
+    expect(warriors.every(u => u.order?.id === 'linha-defensiva' && u.order.givenRound === state.round && u.order.settledRound === state.round + 2)).toBe(true);
     expect(archers.every(u => !u.order)).toBe(true);
     expect(leader.order).toBeUndefined();
     const platoon = state.platoons.find(p => p.id === 'pelotao-duarte')!;
-    expect(platoon.readyRound).toEqual({ guerreiros: state.round + 3, arqueiros: 0 });
+    expect(platoon.lastOrder.guerreiros).toMatchObject({ id: 'linha-defensiva', settledRound: state.round + 2 });
+    expect(platoon.lastOrder.arqueiros).toBeUndefined();
+    // No cooldown: the leader may shout again right away, here to the archers.
+    expect(issueOrder(state, 'arqueiros-disparem', 'arqueiros').ok).toBe(true);
   });
 
-  it('a division on cooldown, a wrong target, missing PL or nobody in range blocks the order', () => {
+  it('orders last until replaced: no expiry, and the bonus only counts once the order has settled', () => {
+    const { state, leader, warriors } = field();
+    const warrior = warriors[0];
+    expect(issueOrder(state, 'linha-defensiva', 'guerreiros').ok).toBe(true);
+    const given = state.round;
+    expect(orderDefense(state, warrior, true)).toBe(0);
+    nextRound(state, leader);
+    expect(orderDefense(state, warrior, true)).toBe(0);
+    nextRound(state, leader);
+    expect(state.round).toBe(given + 2);
+    expect(orderDefense(state, warrior, true)).toBe(ORDER_BONUS.linha);
+    skipTo(state, given + 6);
+    expect(warrior.order).toMatchObject({ id: 'linha-defensiva' });
+    expect(orderDefense(state, warrior, true)).toBe(ORDER_BONUS.linha);
+  });
+
+  it('replacing an order before it settles stresses the troops; after it settles it does not', () => {
     const { state, leader, archers } = field();
+    expect(issueOrder(state, 'arqueiros-preparar', 'arqueiros').ok).toBe(true);
+    nextRound(state, leader);
+    // "Arqueiros, preparar disparo!" and, the very next turn, a different order: sudden.
+    const check = checkOrder(state, leader, 'avanco-devagar', 'arqueiros');
+    expect(check.sudden).toHaveLength(archers.length);
+    const result = issueOrder(state, 'avanco-devagar', 'arqueiros');
+    expect(result.message).toBe(`Duarte: "Arqueiros, avancem devagar!" (${archers.length} tropas, ${archers.length} sob estresse).`);
+    expect(archers.every(u => stressLevel(state, u) === 1 && u.order?.chain === 1)).toBe(true);
+    // A troop that has settled its order takes a new one calmly.
+    nextRound(state, leader); nextRound(state, leader);
+    expect(checkOrder(state, leader, 'arqueiros-disparem', 'arqueiros').sudden).toHaveLength(0);
+    expect(issueOrder(state, 'arqueiros-disparem', 'arqueiros').ok).toBe(true);
+    expect(archers.every(u => stressLevel(state, u) === 0 && u.order?.chain === 0)).toBe(true);
+  });
+
+  it('stress takes attack and defense away, grows with each sudden order in a row and ends with the troop\'s next turn', () => {
+    const { state, leader, warriors } = field();
+    const warrior = warriors[0];
+    const enemy = state.units.find(u => u.team === 'enemy' && u.role === 'troop')!;
+    const attacking = hitChance(state, warrior, enemy), defending = hitChance(state, enemy, warrior);
+    expect(issueOrder(state, 'avanco-devagar', 'guerreiros').ok).toBe(true);
+    leader.pl = leader.maxPl;
+    expect(issueOrder(state, 'manter-posicao', 'guerreiros').ok).toBe(true);
+    leader.pl = leader.maxPl;
+    expect(issueOrder(state, 'linha-defensiva', 'guerreiros').ok).toBe(true);
+    expect(stressLevel(state, warrior)).toBe(2);
+    expect(hitChance(state, warrior, enemy)).toBe(attacking - 2 * STRESS.perLevel);
+    expect(hitChance(state, enemy, warrior)).toBe(defending + 2 * STRESS.perLevel);
+    // The warrior has not acted this round yet: the stress lasts through its turn, then it is gone.
+    expect(warrior.stress?.round).toBe(state.round);
+    endTurn(state);
+    while (getActive(state)?.id !== warrior.id) endTurn(state);
+    expect(stressLevel(state, warrior)).toBe(2);
+    endTurn(state);
+    expect(stressLevel(state, warrior)).toBe(0);
+    expect(hitChance(state, enemy, warrior)).toBe(defending);
+  });
+
+  it('stress tops out at the cap', () => {
+    const { state, leader, warriors } = field();
+    const ids = ['avanco-devagar', 'manter-posicao', 'linha-defensiva', 'avanco-rapido', 'atacar', 'recuar', 'levantar-escudos'] as const;
+    for (const id of ids) { leader.pl = leader.maxPl; expect(issueOrder(state, id, 'guerreiros').ok).toBe(true); }
+    expect(warriors[0].order?.chain).toBe(ids.length - 1);
+    expect(stressLevel(state, warriors[0])).toBe(STRESS.max);
+  });
+
+  it('a wrong group, a flat field, missing PL, nobody in range or the same order again block it and spend nothing', () => {
+    const { state, leader, archers, warriors } = field();
     expect(issueOrder(state, 'atacar', 'guerreiros').ok).toBe(true);
-    expect(issueOrder(state, 'avanco-rapido', 'todos')).toMatchObject({ ok: false, message: 'Recarga: guerreiros livres na rodada 4.' });
-    expect(issueOrder(state, 'linha-defensiva', 'arqueiros')).toMatchObject({ ok: false, message: 'Esta ordem não vale para arqueiros.' });
-    expect(issueOrder(state, 'arqueiros-preparar', 'arqueiros')).toMatchObject({ ok: false, message: 'Pontos de liderança insuficientes.' });
+    expect(issueOrder(state, 'atacar', 'guerreiros')).toMatchObject({ ok: false, message: 'Os guerreiros no alcance já cumprem essa ordem.' });
+    expect(issueOrder(state, 'linha-defensiva', 'arqueiros')).toMatchObject({ ok: false, message: 'Essa ordem não vale para os arqueiros.' });
+    expect(issueOrder(state, 'terreno-elevado', 'todos')).toMatchObject({ ok: false, message: 'Este campo é plano: não há terreno elevado para ocupar.' });
+    expect(issueOrder(state, 'arqueiros-preparar', 'arqueiros')).toMatchObject({ ok: false, message: 'Pontos de liderança insuficientes: a ordem custa 3 e restam 2.' });
+    expect(leader.pl).toBe(2);
     leader.pl = 6;
     archers.forEach((archer, i) => { archer.pos = { q: 25 - (i % 2), r: 1 + i }; });
-    expect(issueOrder(state, 'arqueiros-disparem', 'todos')).toMatchObject({ ok: false, message: 'Nenhuma tropa desta divisão no alcance de comando.' });
+    expect(issueOrder(state, 'arqueiros-disparem', 'todos')).toMatchObject({ ok: false, message: 'Nenhuma tropa desse grupo no alcance de comando.' });
     expect(leader.pl).toBe(6);
+    // A new target for the same order is a refinement, not a new order: no stress, no restart.
+    const settled = warriors[0].order!.settledRound;
+    expect(issueOrder(state, 'atacar', 'guerreiros', { focus: 'lider' }).ok).toBe(true);
+    expect(warriors[0].order).toMatchObject({ id: 'atacar', focus: 'lider', settledRound: settled, chain: 0 });
+    expect(stressLevel(state, warriors[0])).toBe(0);
     const troop = platoonTroops(state, 'pelotao-duarte')[0];
     setActive(state, troop);
     expect(issueOrder(state, 'atacar', 'todos')).toMatchObject({ ok: false, message: 'Só quem comanda um pelotão dá ordens.' });
@@ -554,29 +639,25 @@ describe('orders and the command tab', () => {
     const far = archers[0];
     far.pos = { q: 1, r: 18 };
     const result = issueOrder(state, 'arqueiros-disparem', 'todos');
-    expect(result.message).toBe('Duarte: "Arqueiros, disparem!" para arqueiros (5 tropas).');
+    expect(result.message).toBe('Duarte: "Arqueiros, disparem!" (5 tropas).');
     expect(archers.filter(u => u.order?.id === 'arqueiros-disparem')).toHaveLength(5);
     expect(far.order).toBeUndefined();
     expect(warriors.every(u => !u.order)).toBe(true);
+    expect(issueOrder(state, 'arqueiros-disparem', 'guerreiros')).toMatchObject({ ok: false });
   });
 
-  it('PL refill on the leader\'s next turn; orders end in range and go stale out of range', () => {
-    const { state, leader, warriors } = field();
+  it('PL refill on the leader\'s next turn', () => {
+    const { state, leader } = field();
     expect(issueOrder(state, 'linha-defensiva', 'guerreiros').ok).toBe(true);
-    const near = warriors[0], far = warriors[1];
-    far.pos = { q: 1, r: 18 };
+    expect(leader.pl).toBe(3);
     skipTo(state, 2);
     while (getActive(state)!.id !== leader.id) endTurn(state);
     expect(leader.pl).toBe(leader.maxPl);
-    skipTo(state, 4);
-    expect(near.order).toBeUndefined();
-    expect(far.order).toMatchObject({ id: 'linha-defensiva', stale: true });
-    expect(checkOrder(state, leader, 'atacar', 'guerreiros').reason).not.toMatch(/Recarga/);
   });
 
   describe('order bonuses', () => {
     const order = (unit: Unit, id: OrderId, extra: Partial<NonNullable<Unit['order']>> = {}) => {
-      unit.order = { id, expiresRound: 99, potency: 1, stale: false, strikeUsed: false, ...extra };
+      unit.order = { id, givenRound: 0, settledRound: 0, potency: 1, chain: 0, strikeUsed: false, ...extra };
     };
     const melee = () => {
       const { state, ally, enemy } = duel(5);
@@ -592,7 +673,7 @@ describe('orders and the command tab', () => {
       expect(hitChance(state, enemy, ally)).toBe(base - ORDER_BONUS.linha);
       order(ally, 'linha-defensiva', { potency: 1.5 });
       expect(hitChance(state, enemy, ally)).toBe(base - 15);
-      order(ally, 'linha-defensiva', { stale: true });
+      order(ally, 'linha-defensiva', { settledRound: state.round + 1 });
       expect(hitChance(state, enemy, ally)).toBe(base);
       const { state: shot, ally: archer, enemy: target } = duel(5, true);
       const arrow = hitChance(shot, archer, target);
@@ -614,10 +695,12 @@ describe('orders and the command tab', () => {
       expect(hitChance(shot, archer, target)).toBe(arrow - ORDER_BONUS.escudos);
     });
 
-    it('Atacar! boosts each troop\'s first attack only, and never a reaction strike', () => {
+    it('Atacar! boosts each troop\'s first attack once the order settled, and never a reaction strike', () => {
       const { state, ally, enemy } = melee();
       enemy.hp = enemy.maxHp = 500;
       const base = hitChance(state, ally, enemy);
+      order(ally, 'atacar', { settledRound: state.round + 1 });
+      expect(hitChance(state, ally, enemy)).toBe(base);
       order(ally, 'atacar');
       expect(hitChance(state, ally, enemy)).toBe(base + ORDER_BONUS.atacar);
       expect(hitChance(state, ally, enemy, true)).toBe(base);
@@ -629,15 +712,18 @@ describe('orders and the command tab', () => {
       expect(hitChance(state, ally, enemy)).toBe(spent);
     });
 
-    it('Arqueiros, preparar disparo!: aiming takes the turn, pays off next round and walking spoils it', () => {
+    it('Arqueiros, preparar disparo!: aiming takes the turn, pays off once the order settled and walking spoils it', () => {
       const { state, ally: archer, enemy } = duel(5, true);
       enemy.pos = { q: 8, r: 4 };
       const base = hitChance(state, archer, enemy);
       expect(aim(state, enemy.id)).toMatchObject({ ok: false, message: 'Só arqueiros com a ordem de preparar disparo miram.' });
-      order(archer, 'arqueiros-preparar');
+      order(archer, 'arqueiros-preparar', { givenRound: state.round, settledRound: state.round + 2 });
       const result = aim(state, enemy.id);
       expect(result).toMatchObject({ ok: true, message: `${archer.name} mira em ${enemy.name}.` });
       expect(getActive(state)?.id).not.toBe(archer.id);
+      expect(hitChance(state, archer, enemy)).toBe(base);
+      // Aimed, but the order has not settled yet: no bonus on the next round.
+      state.round++;
       expect(hitChance(state, archer, enemy)).toBe(base);
       state.round++;
       expect(hitChance(state, archer, enemy)).toBe(base + ORDER_BONUS.mira);
@@ -648,11 +734,99 @@ describe('orders and the command tab', () => {
     });
   });
 
-  it('the seven orders have distinct hotkey letters and costs between 2 and 4 PL', () => {
-    expect(ORDERS).toHaveLength(7);
-    expect(new Set(ORDERS.map(o => o.mark)).size).toBe(7);
-    expect(ORDERS.every(o => o.pl >= 2 && o.pl <= 4)).toBe(true);
-    expect(ORDERS.filter(o => o.targets.length === 1).map(o => o.id)).toEqual(['arqueiros-disparem', 'arqueiros-preparar']);
+  it('every order has its own letter, a cost between 1 and 4 PL and a shout the troops understand', () => {
+    expect(ORDERS).toHaveLength(13);
+    expect(new Set(ORDERS.map(o => o.mark)).size).toBe(ORDERS.length);
+    expect(ORDERS.every(o => o.pl >= 1 && o.pl <= 4)).toBe(true);
+    expect(ORDERS.filter(o => o.targets.length === 1).map(o => o.id)).toEqual(['arqueiros-disparem', 'arqueiros-preparar', 'cessar-fogo']);
+    for (const o of ORDERS) for (const target of o.targets) for (const words of [orderCall(o.id, target), ...o.examples]) {
+      expect(parseOrder(words), words).toMatchObject({ ok: true, id: o.id });
+    }
+  });
+});
+
+describe('shouted orders', () => {
+  it.each([
+    ['Arqueiros, preparar disparo!', 'arqueiros-preparar'],
+    ['Arqueiros, procurem terreno elevado!', 'terreno-elevado'],
+    ['Avancem!', 'avanco-devagar'],
+    ['Avançem rápido!', 'avanco-rapido'],
+    ['Segurem a linha!', 'linha-defensiva'],
+    ['Escudos ao alto!', 'levantar-escudos'],
+    ['Preparem os escudos!', 'levantar-escudos'],
+    ['Cubram-se!', 'levantar-escudos'],
+    ['Fogo!', 'arqueiros-disparem'],
+    ['Pra cima deles!', 'atacar'],
+    ['Avancem e ataquem!', 'atacar'],
+    ['Alto!', 'manter-posicao'],
+    ['Não avancem!', 'manter-posicao'],
+    ['Ninguém se mexe!', 'manter-posicao'],
+    ['Não recuem!', 'manter-posicao'],
+    ['Batam em retirada!', 'recuar'],
+    ['Ataquem pelo flanco!', 'flanquear'],
+    ['Protejam-me!', 'proteger-lider'],
+    ['Recuem até mim!', 'proteger-lider'],
+    ['Segurem o fogo!', 'cessar-fogo'],
+    ['Não atirem!', 'cessar-fogo'],
+    ['Preparar, apontar, fogo!', 'arqueiros-preparar'],
+  ] as const)('"%s" is understood as %s', (words, id) => {
+    expect(parseOrder(words)).toMatchObject({ ok: true, id });
+  });
+
+  it('ignores accents and case, and forgives a small typo', () => {
+    expect(parseOrder('FORMAR LINHA DEFENSIVA')).toMatchObject({ ok: true, id: 'linha-defensiva' });
+    expect(parseOrder('avancem rapido')).toMatchObject({ ok: true, id: 'avanco-rapido' });
+    expect(parseOrder('Arqeuiros, dispraem!')).toMatchObject({ ok: true, id: 'arqueiros-disparem', vocative: 'arqueiros' });
+    expect(parseOrder('avnçem')).toMatchObject({ ok: true, id: 'avanco-devagar' });
+  });
+
+  it('reads who an attack singles out, and tells the group called from the target', () => {
+    expect(parseOrder('Matem o líder!')).toMatchObject({ ok: true, id: 'atacar', focus: 'lider' });
+    expect(parseOrder('Arqueiros, atirem nos arqueiros deles!')).toMatchObject({ ok: true, id: 'arqueiros-disparem', focus: 'arqueiros', vocative: 'arqueiros' });
+    expect(parseOrder('Mirem nos feridos')).toMatchObject({ ok: true, id: 'arqueiros-preparar', focus: 'feridos' });
+    expect(parseOrder('Arqueiros, disparem!')).not.toHaveProperty('focus');
+    expect(parseOrder('Arqueiros e guerreiros, avancem!')).toMatchObject({ ok: true, vocative: 'todos' });
+  });
+
+  it.each([
+    ['', 'vazia'],
+    ['asdfgh', 'desconhecida'],
+    ['Recuem e formem linha', 'confusa'],
+    ['Guerreiros, avancem, arqueiros, disparem!', 'confusa'],
+    ['Não levantem os escudos', 'confusa'],
+    ['Se chegarem perto, recuem', 'condicao'],
+    ['Quando eu mandar, ataquem', 'condicao'],
+    ['Protejam os arqueiros', 'objeto'],
+    ['Arqueiros, disparem agora mesmo naqueles malditos saqueadores fedorentos que vem lá do outro lado!', 'longa'],
+  ] as const)('"%s" is not followed (%s)', (words, problem) => {
+    expect(parseOrder(words)).toMatchObject({ ok: false, problem });
+  });
+
+  it('suggests the closest word when a misspelling goes too far', () => {
+    expect(parseOrder('atakem')).toMatchObject({ ok: false, problem: 'desconhecida', suggestion: 'ataquem' });
+  });
+
+  it('the group named in the shout narrows "todos" and must match the group picked', () => {
+    const parsed = parseOrder('Arqueiros, avancem!');
+    if (!parsed.ok) throw new Error('not understood');
+    expect(resolveGroup(parsed, 'todos')).toEqual({ target: 'arqueiros' });
+    expect(resolveGroup(parsed, 'arqueiros')).toEqual({ target: 'arqueiros' });
+    expect(resolveGroup(parsed, 'guerreiros')).toEqual({ error: 'A ordem chama os arqueiros, mas você escolheu os guerreiros.' });
+  });
+
+  it('a shout the troops do not understand warns and gives the PL back; one they understand is given in the leader\'s words', () => {
+    const state = createBattle(1, 'campo-aberto');
+    const leader = getActive(state)!;
+    const before = JSON.stringify(state);
+    expect(shoutOrder(state, 'Guerreiros, xablau!', 'guerreiros')).toMatchObject({ ok: false, message: expect.stringMatching(/não entenderam.*PL devolvido\.$/) });
+    expect(shoutOrder(state, 'Arqueiros, procurem terreno elevado!', 'arqueiros')).toMatchObject({ ok: false, message: 'Este campo é plano: não há terreno elevado para ocupar. PL devolvido.' });
+    expect(shoutOrder(state, 'Arqueiros, fogo!', 'guerreiros')).toMatchObject({ ok: false, message: 'A ordem chama os arqueiros, mas você escolheu os guerreiros. PL devolvido.' });
+    expect(JSON.stringify(state)).toBe(before);
+    const result = shoutOrder(state, '  Arqueiros, preparar disparo!  ', 'arqueiros');
+    expect(result).toMatchObject({ ok: true, message: 'Duarte: "Arqueiros, preparar disparo!" (6 tropas).' });
+    expect(result.events[0]).toMatchObject({ type: 'order', order: 'arqueiros-preparar', words: 'Arqueiros, preparar disparo!' });
+    expect(leader.pl).toBe(3);
+    expect(state.platoons[0].lastOrder.arqueiros).toMatchObject({ id: 'arqueiros-preparar', words: 'Arqueiros, preparar disparo!' });
   });
 });
 
@@ -673,6 +847,7 @@ describe('the troop AI follows orders', () => {
   });
 
   it.each([
+    ['manter-posicao', 0, 0],
     ['linha-defensiva', 0, 1],
     ['levantar-escudos', 0, 1],
     ['avanco-devagar', 1, 2],
@@ -712,6 +887,63 @@ describe('the troop AI follows orders', () => {
     const events = aiTurn(state, archer);
     expect(events.some(e => e.type === 'attack' && e.unitId === archer.id && e.targetId === enemy.id)).toBe(shoots);
     expect(events.some(e => e.stray)).toBe(false);
+  });
+
+  it('archers told to cease fire hold their arrows even with a clear shot', () => {
+    const { state } = field('cessar-fogo');
+    const archer = state.units.find(u => u.id === 'aliado-arco-1')!;
+    const enemy = state.units.find(u => u.id === 'inimigo-2')!;
+    enemy.pos = { q: archer.pos.q, r: archer.pos.r - 4 };
+    expect(previewAttack(state, archer, enemy).allowed).toBe(true);
+    expect(aiTurn(state, archer).some(e => e.type === 'attack')).toBe(false);
+  });
+
+  it.each([
+    ['the closer troop', undefined, 'inimigo-2'],
+    ['the leader, when told to', 'lider', 'senhor-da-guerra'],
+  ] as const)('archers told to shoot pick %s', (_, focus, expected) => {
+    const { state } = field();
+    expect(issueOrder(state, 'arqueiros-disparem', 'arqueiros', focus ? { focus } : {}).ok).toBe(true);
+    const archer = state.units.find(u => u.id === 'aliado-arco-1')!;
+    const troop = state.units.find(u => u.id === 'inimigo-2')!, chief = state.units.find(u => u.id === 'senhor-da-guerra')!;
+    troop.pos = { q: archer.pos.q, r: archer.pos.r - 3 }; chief.pos = { q: archer.pos.q + 1, r: archer.pos.r - 5 };
+    expect(previewAttack(state, archer, chief).allowed && previewAttack(state, archer, troop).allowed).toBe(true);
+    const events = aiTurn(state, archer);
+    expect(events.find(e => e.type === 'attack' && e.unitId === archer.id)?.targetId).toBe(expected);
+  });
+
+  it('troops told to fall back open distance from the enemy', () => {
+    const { state, warrior } = field('recuar');
+    const enemy = state.units.find(u => u.team === 'enemy' && u.role === 'troop' && u.weapon.kind === 'melee')!;
+    enemy.pos = { q: warrior.pos.q + 3, r: warrior.pos.r };
+    const before = distance(warrior.pos, enemy.pos);
+    aiTurn(state, warrior);
+    expect(distance(warrior.pos, enemy.pos)).toBeGreaterThan(before);
+  });
+
+  it('troops told to protect the leader close in around him', () => {
+    const { state, leader, warrior } = field('proteger-lider');
+    warrior.pos = { q: leader.pos.q, r: leader.pos.r + 4 };
+    expect(state.units.filter(u => u.id !== warrior.id && key(u.pos) === key(warrior.pos))).toHaveLength(0);
+    const before = distance(warrior.pos, leader.pos);
+    aiTurn(state, warrior);
+    expect(distance(warrior.pos, leader.pos)).toBeLessThan(before);
+  });
+
+  it('archers told to prepare keep aiming while the order settles, then shoot with the bonus', () => {
+    const { state } = field('arqueiros-preparar');
+    const archer = state.units.find(u => u.id === 'aliado-arco-1')!;
+    const enemy = state.units.find(u => u.id === 'inimigo-2')!;
+    enemy.pos = { q: archer.pos.q, r: archer.pos.r - 5 };
+    const base = hitChance(state, archer, enemy);
+    const shots = () => aiTurn(state, archer).filter(e => e.type === 'attack' && e.unitId === archer.id);
+    expect(shots()).toHaveLength(0);
+    expect(archer.order?.aimTargetId).toBe(enemy.id);
+    state.round++; archer.ap = archer.maxAp;
+    expect(shots()).toHaveLength(0);
+    state.round++; archer.ap = archer.maxAp;
+    expect(hitChance(state, archer, enemy)).toBe(Math.min(95, base + ORDER_BONUS.mira));
+    expect(shots().length).toBeGreaterThan(0);
   });
 
   it('the AI leader gives orders before the troops move', () => {
