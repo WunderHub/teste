@@ -65,7 +65,7 @@ Cada lado tem 1 líder, 14 guerreiros (maça ou lança do nosso lado, cutelo ou 
 
 ### Ordens
 
-O líder grita as ordens. O jogador escolhe o grupo e escreve a ordem; um leitor próprio do jogo (`src/commands.ts`, sem serviço externo) entende sinônimos, formas do verbo, falta de acento e pequenos erros de digitação. Se a ordem não for entendida (sem ordem conhecida, duas ordens de uma vez, condições como "se" e "quando", mais de 12 palavras ou contradição com o grupo escolhido), o jogo avisa e devolve o PL. Alguns gritos escolhem um alvo preferido: "Ataquem o líder!", "Mirem nos arqueiros!", "Acabem com os feridos!".
+O líder grita as ordens. O jogador escolhe o grupo e escreve uma ação ou um plano tático. O leitor local entende ações com sinônimos, flexões e pequenos erros, condições (`se… senão`, `quando…`), transições (`até… depois`) e ordens para grupos distintos. Exemplo: **“Se vida abaixo de 30%, recuem; senão, ataquem o líder”**. Cada tropa avalia sua condição no início da própria vez; sem alternativa, aguarda sem agir. O plano custa o maior custo entre suas ações, pago uma vez; grupos separados somam. A prévia mostra a interpretação antes do envio. Frases inválidas não gastam PL. Veja [exemplos, condições aceitas e limites](docs/ordens-condicionais.md).
 
 Ordens custam PL (pontos de liderança), não PA. O Líder de Combate tem 6 PL por turno e alcance de comando de 5 hexágonos; o comandante interino também. Não há recarga: a ordem vale até ser trocada. Ela só dá bônus depois de **assentar**, passando uma rodada inteira sem troca (dada na rodada 1, assenta na rodada 3). Trocar uma ordem que ainda não assentou deixa as tropas sob **estresse**: −5 de ataque e de defesa por nível, até o fim do próximo turno delas; cada troca seguida soma um nível, até 4. Repetir a ordem ou só mudar o alvo não estressa. Quem está fora do alcance não ouve a ordem nova e segue a anterior. A letra no ombro de cada tropa mostra a ordem que ela segue: apagada enquanto assenta e com "!" sob estresse.
 
@@ -102,7 +102,7 @@ Ainda não há altura de terreno, cobertura parcial, dispersão de projéteis al
 ## Organização
 
 - `src/game.ts`: motor de combate determinístico, sem dependência do Phaser ou DOM. Inclui líderes, subclasses, pelotões, nota de atributo, ordens, PL e comando interino.
-- `src/commands.ts`: o leitor de ordens gritadas, que transforma o texto do jogador numa ordem.
+- `src/commands.ts`: interface pública das ordens gritadas; `src/order-language.ts` lê ações e `src/tactics.ts` interpreta e executa planos condicionais.
 - `src/ai.ts`: a IA das tropas e dos líderes que o jogador não controla.
 - `src/encounters.ts`: os encontros. O Campo das Salinas (20 contra 20) é o que o jogo abre; a emboscada original de 3 contra 4 continua como base dos testes de regras.
 - `src/game.test.ts`: testes de regras e simulações completas.

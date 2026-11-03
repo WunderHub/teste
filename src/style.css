@@ -176,7 +176,7 @@ canvas { display: block; }
 .shout-button { padding: 0 12px; border: 1px solid #c49a66a6; background: linear-gradient(160deg, #c49a6640, #c49a661a); color: #f0d9b2; font-size: 14px; font-weight: 600; letter-spacing: .03em; }
 .shout-button:hover:not(:disabled) { border-color: #e0bd86; }
 .shout-button:disabled { opacity: .4; }
-.compose-hint { margin-top: 5px !important; min-height: 32px; font-size: 12px; line-height: 1.33; color: #8f9d88; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.compose-hint { margin-top: 5px !important; min-height: 32px; font-size: 12px; line-height: 1.33; color: #8f9d88; display: block; max-height: 105px; overflow-y: auto; overflow-wrap: anywhere; }
 .compose-hint[data-tone='ok'] { color: #9fc1b6; }
 .compose-hint[data-tone='caution'] { color: #e3b07c; }
 .compose-hint[data-tone='warn'] { color: #e09a88; }
@@ -406,3 +406,10 @@ kbd { font: 9px var(--sans); border: 1px solid #9aa48b42; min-width: 15px; heigh
 }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
+
+.compose-examples { margin-top: 6px; color: #aeb8a2; font-size: 12px; line-height: 1.4; }
+.compose-examples summary { cursor: pointer; }
+.compose-examples p { margin-top: 5px; }
+
+textarea.compose-input { height: 68px; min-height: 68px; max-height: 120px; padding: 7px 9px; line-height: 1.35; resize: vertical; }
+.compose-examples[open] { max-height: 160px; overflow-y: auto; }

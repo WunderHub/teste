@@ -252,6 +252,9 @@ export class CombatScene extends Phaser.Scene {
         pawn.mark.setText(`${orderInfo(unit.order.id).mark}${stressed ? '!' : ''}`).setPosition(p.x - 23, p.y - 40).setDepth(101 + p.y).setVisible(true)
           .setAlpha(isSettled(this.state, unit.order) || stressed ? 1 : 0.55).setColor(stressed ? '#f0a07c' : unit.team === 'ally' ? '#e2c99f' : '#e8a596');
       }
+      if (unit.tactic?.waiting && unit.morale > 0) {
+        pawn.mark.setText('?').setPosition(p.x - 23, p.y - 40).setDepth(101 + p.y).setVisible(true).setAlpha(0.8).setColor('#e2c99f');
+      }
       pawn.image.setTexture(unit.asset).setDisplaySize(82, 100).setAlpha(unit.morale === 0 ? 0.68 : 1);
       const selected = unit.id === active?.id, hovered = unit.id === this.view.hoveredId, leader = unit.role === 'leader';
       const color = selected ? COLORS.gold : COLORS[unit.team];
