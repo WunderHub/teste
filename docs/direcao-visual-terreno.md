@@ -4,6 +4,10 @@ Este documento registra as decisões do usuário posteriores ao protótipo. É u
 
 ## Personagens
 
+> **Atualização (02/11/2026, decisão do chefe):** no lugar do corpo inteiro, as peças voltaram a ser **bustos** (cabeça e tronco, da cintura para cima, sem braços), porque cada arma exigiria uma pose de braço própria num corpo inteiro. Arma e escudo ficam na frente do corpo; a aljava fica nas costas. A cor da facção é aplicada em código no tecido da armadura e na face do escudo, por máscaras. As camadas estão em `arte/bustos-v1/` (encaixe em `encaixe.json`).
+>
+> **No jogo desde 05/11/2026 (versão 1):** guerreiro com espada e escudo para quem usa arma de uma mão, guerreiro só com espada para lanceiros e líderes (ainda sem arte própria), e arqueiro com arco e aljava. Todas as tropas têm o mesmo rosto. Cores de teste: aliados azul `#2e5274`, inimigos vermelho `#842e24`. As bases no chão continuam marcando seleção, lado e líder. Os itens abaixo sobre corpo inteiro ficam como referência até serem revistos.
+
 - Usar personagens de corpo inteiro no campo, sem base, pedestal ou plataforma artificial. Os pés ficam sobre o terreno.
 - Centralizar o ponto de apoio entre os pés no centro do hexágono ocupado, considerando a altura desse hexágono.
 - Movimento como peça de tabuleiro, sem animações corporais por enquanto.
