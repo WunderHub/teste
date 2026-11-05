@@ -1,9 +1,9 @@
 import {
-  attributeScore, checkOrder, commandedPlatoons, commanderOf, distance, divisionOf, isPlayerControlled, isSettled, leaderClassLabel,
+  attributeScore, commandedPlatoons, commanderOf, distance, divisionOf, isPlayerControlled, isSettled, leaderClassLabel,
   orderInfo, ORDERS, platoonOf, platoonTroops, STRESS, stressLevel, VOCATIVES,
   type BattleState, type Division, type OrderCheck, type OrderTarget, type Unit,
 } from './game';
-import { focusLabel, MAX_SHOUT_LENGTH, parseOrder, resolveGroup } from './commands';
+import { focusLabel, MAX_SHOUT_LENGTH, checkShout } from './commands';
 import { ENCOUNTER_NAMES } from './encounters';
 
 type BattleUnit = BattleState['units'][number];
@@ -48,17 +48,12 @@ export function previewShout(state: BattleState, leader: Unit, composer: Compose
   const typed = composer.text.trim();
   const bare = typed.replace(new RegExp(`^${VOCATIVES[group]}[\\s,!]*`, 'i'), '').trim();
   if (!bare) return { understood: false, tone: 'idle', text: `Ex.: ${EXAMPLES[group].map(e => `"${e}"`).join(', ')}` };
-  const parsed = parseOrder(typed);
-  if (!parsed.ok) return parsed.problem === 'desconhecida' ? { understood: false, tone: 'idle', text: 'Ainda não entendem…' }
-    : { understood: false, tone: 'warn', text: parsed.message };
-  const resolved = resolveGroup(parsed, group);
-  if ('error' in resolved) return { understood: false, tone: 'warn', text: resolved.error };
-  const info = orderInfo(parsed.id), check = checkOrder(state, leader, parsed.id, resolved.target, parsed.focus);
-  const name = `${info.label}${parsed.focus && info.focus ? ` ${focusLabel(parsed.focus)}` : ''}`;
-  if (!check.allowed) return { understood: true, tone: 'warn', text: `Entendem "${name}", mas: ${check.reason}`, check };
+  const parsed = checkShout(state, leader, typed, group);
+  if (!parsed.ok) return { understood: false, tone: 'warn', text: parsed.message };
+  const check = parsed.check;
   const stressed = check.sudden.length ? ` · ${check.sudden.length} sob estresse` : '';
   return { understood: true, tone: check.sudden.length ? 'caution' : 'ok', check,
-    text: `Entendem: ${name} · ${info.pl} PL · ${troopsWord(check.changing.length)}${stressed}` };
+    text: `${parsed.label} · ${check.cost} PL · ${troopsWord(check.changing.length)}${stressed}` };
 }
 
 export interface UIView {
@@ -122,6 +117,7 @@ function roleLine(state: BattleState, unit: BattleUnit): string {
 function orderLine(state: BattleState, unit: BattleUnit): string {
   if (commandedPlatoons(state, unit).length) return `Comanda · ${unit.pl}/${unit.maxPl} PL · alcance ${unit.commandRange} hex`;
   if (unit.role === 'leader') return 'Sem pelotão para comandar.';
+  if (unit.tactic) return `${unit.tactic.waiting ? 'Aguarda condição' : 'Plano ativo'}: ${unit.tactic.label}`;
   if (unit.order) {
     const stress = stressLevel(state, unit);
     const settle = isSettled(state, unit.order) ? 'assentada' : `assenta na rodada ${unit.order.settledRound}`;
@@ -176,8 +172,14 @@ export class CombatUI {
         </div>
         <form class="order-compose" data-ui="compose-form" autocomplete="off" hidden>
           <div class="compose-to"><span class="compose-label">Gritar para</span><button type="button" class="compose-group" data-action="compose-regroup" data-ui="compose-group" title="Trocar quem ouve a ordem">Guerreiros</button><button type="button" class="compose-cancel" data-action="compose-cancel" title="Cancelar — Esc">Cancelar <kbd>ESC</kbd></button></div>
-          <div class="compose-field"><input class="compose-input" data-ui="compose-input" type="text" maxlength="${MAX_SHOUT_LENGTH}" spellcheck="false" lang="pt-BR" aria-label="Ordem que o líder grita" placeholder="Escreva a ordem…"><button type="submit" class="shout-button" data-ui="compose-submit">Gritar</button></div>
+          <div class="compose-field"><textarea class="compose-input" data-ui="compose-input" rows="3" maxlength="${MAX_SHOUT_LENGTH}" spellcheck="false" lang="pt-BR" aria-label="Ordem que o líder grita" placeholder="Ex.: Se vida abaixo de 30%, recuem; senão, ataquem."></textarea><button type="submit" class="shout-button" data-ui="compose-submit">Gritar</button></div>
           <p class="compose-hint" data-ui="compose-hint" aria-live="polite"></p>
+          <details class="compose-examples"><summary>Exemplos de planos e condições</summary>
+            <p>Se a vida ficar abaixo de 30%, recuem; senão, ataquem o líder.</p>
+            <p>Arqueiros, avancem até os inimigos entrarem no alcance, depois disparem.</p>
+            <p>Guerreiros, avancem; arqueiros, quando inimigos no alcance, disparem.</p>
+            <p>Condições: vida, fadiga, moral baixa, inimigos perto (2 hex), no alcance ou a até 3 hex. Combine com “e”, “ou” e “não”. Cada tropa avalia no início da própria vez. Sem alternativa, aguarda sem agir. Custo: maior ação de cada plano; grupos separados somam.</p>
+          </details>
         </form>
         <div class="division-status">
           ${DIVISIONS.map(division => `<p data-ui="status-${division}"><strong>${TARGET_NAMES[division]}</strong><span class="status-mark" data-ui="status-mark-${division}"></span><span data-ui="status-text-${division}"></span></p>`).join('')}
@@ -372,7 +374,7 @@ export class CombatUI {
       chip.title = `${near} de ${troopsWord(total)} no alcance de comando`;
       chip.disabled = !canAct || !total;
     }
-    const input = this.node('compose-input') as HTMLInputElement;
+    const input = this.node('compose-input') as HTMLTextAreaElement;
     if (step === 'text' && composer.group) {
       this.text('compose-group', TARGET_NAMES[composer.group]);
       // The box keeps what the player types; it is only filled when it opens.
@@ -394,17 +396,18 @@ export class CombatUI {
 
     for (const division of DIVISIONS) {
       const members = troops.filter(unit => divisionOf(unit) === division);
+      const plans = members.filter(unit => unit.tactic);
       const last = platoons.map(platoon => platoon.lastOrder[division]).find(Boolean);
       this.node(`status-${division}`).hidden = !members.length;
-      this.text(`status-mark-${division}`, last ? orderInfo(last.id).mark : '·');
+      this.text(`status-mark-${division}`, plans.length ? '?' : last ? orderInfo(last.id).mark : '·');
       const stressed = members.filter(unit => stressLevel(state, unit) > 0).length;
       const settle = last ? state.round >= last.settledRound ? 'assentada' : `assenta na rodada ${last.settledRound}` : '';
-      this.text(`status-text-${division}`, last
+      this.text(`status-text-${division}`, plans.length ? `${plans.length} com plano · ${plans.filter(u => u.tactic?.waiting).length} aguardando condição` : last
         ? `${orderInfo(last.id).label}${last.focus ? ` ${focusLabel(last.focus)}` : ''} · ${settle}${stressed ? ` · ${stressed} sob estresse` : ''}`
         : 'Sem ordem: mantêm a posição');
       this.node(`status-mark-${division}`).classList.toggle('is-idle', !last);
       this.node(`status-mark-${division}`).classList.toggle('is-settling', Boolean(last && state.round < last.settledRound));
-      this.node(`status-${division}`).title = last ? `"${last.words}"` : '';
+      this.node(`status-${division}`).title = plans.length ? plans.map(u => `${u.name}: ${u.tactic!.label}`).join('\n') : last ? `"${last.words}"` : '';
     }
     this.text('command-range', `Alcance de comando ${leader.commandRange} hex · ${inRange.length} de ${troopsWord(troops.length)} ao alcance`);
   }
@@ -534,23 +537,24 @@ export class CombatUI {
   /** The step the order box showed last, to fill and focus it only when it opens. */
   private composeStep: Composer['step'] = 'closed';
   private onInput = (event: Event): void => {
-    if (event.target instanceof HTMLInputElement && event.target.dataset.ui === 'compose-input') this.callbacks.onComposeText(event.target.value);
+    if (event.target instanceof HTMLTextAreaElement && event.target.dataset.ui === 'compose-input') this.callbacks.onComposeText(event.target.value);
   };
   private onSubmit = (event: Event): void => {
     event.preventDefault();
-    const input = this.node('compose-input') as HTMLInputElement;
+    const input = this.node('compose-input') as HTMLTextAreaElement;
     if (input.value.trim()) this.callbacks.onComposeSubmit(input.value);
   };
   /** Puts the cursor back in the order box, e.g. after the player clicked the field. */
   focusComposer(): void {
-    const input = this.node('compose-input') as HTMLInputElement;
+    const input = this.node('compose-input') as HTMLTextAreaElement;
     if (!this.node('compose-form').hidden) input.focus({ preventScroll: true });
   }
 
   private onKeyDown = (event: KeyboardEvent): void => {
-    if (event.target instanceof HTMLInputElement) {
+    if (event.target instanceof HTMLTextAreaElement) {
       // Typing an order never reaches the field's hotkeys.
       event.stopPropagation();
+      if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); this.onSubmit(event); }
       if (event.key === 'Escape') { event.preventDefault(); this.callbacks.onComposeCancel(); }
       return;
     }

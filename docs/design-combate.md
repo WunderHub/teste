@@ -193,7 +193,9 @@ Algumas ordens aceitam um **alvo preferido** dito no grito: "Ataquem o líder!",
 | Cessar fogo | "Cessar fogo!", "Segurem o fogo!", "Não atirem!" |
 | Procurar terreno elevado | "Procurem terreno elevado!", "Subam a colina!", "Tomem o morro!" |
 
-### Como o jogo lê a ordem (proposta)
+### Como o jogo lê a ordem (implementado)
+
+Planos condicionais, etapas e grupos distintos estão implementados conforme [ordens-condicionais.md](ordens-condicionais.md). As regras abaixo descrevem as ações individuais.
 
 - **Acentos, maiúsculas e pontuação não importam.** Letras repetidas viram uma só ("Avançeeem!!!" vira "avancem").
 - **Erros de digitação pequenos passam**: nenhum em palavras de até 3 letras, 1 em palavras de 4 a 7 letras e 2 a partir de 8. Letras trocadas de lugar contam como um erro só ("dispraem" vira "disparem"). Palavras comuns que não são ordem ("minha", "tipo", "parte") nunca são confundidas com ordens parecidas ("linha", "tiro", "pare").
@@ -202,9 +204,9 @@ Algumas ordens aceitam um **alvo preferido** dito no grito: "Ataquem o líder!",
 - **Negação**: só vale para parar algo. "Não avancem" e "ninguém se mexe" viram Manter posição. "Não atirem" vira Cessar fogo. "Não recuem" vira Manter posição. Outras negações ("não defendam") são confusas demais para o meio da batalha.
 - **O que o jogo não entende** (e devolve o PL):
   - Grito sem nenhuma ordem conhecida. Se uma palavra parece uma ordem mal escrita, o aviso sugere a certa ("Você quis dizer 'disparem'?").
-  - Duas ordens diferentes de uma vez ("Avancem e recuem!"). O aviso diz o que as tropas ouviram.
-  - Condições ("se", "quando", "caso", "assim que"): "Se eles chegarem, ataquem" é complexo demais.
-  - Grito com mais de 12 palavras, sem contar o grupo chamado. A caixa aceita até 90 letras.
+  - Duas ações incompatíveis sem condição ou grupos separados ("Avancem e recuem!"). Use “se… senão”, “até… depois” ou grupos distintos separados por ponto e vírgula.
+  - Condições desconhecidas ou vagas, como “se puderem” ou “quando eu mandar”. Condições conhecidas são aceitas em planos.
+  - Ação individual com mais de 12 palavras. O plano completo aceita 280 caracteres e 55 palavras.
   - Ordem que não vale para o grupo ("Arqueiros, levantar escudos!"), sem tropa do grupo no alcance, ou que todas as tropas no alcance já cumprem.
 - **Palavras que reforçam a mesma ordem** se juntam numa só: "Avancem e ataquem!" é Atacar; "Segurem a linha com os escudos!" é Levantar escudos.
 - O texto escrito pelo player é o que aparece no balão de fala do líder e no registro de combate.

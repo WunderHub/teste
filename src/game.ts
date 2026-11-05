@@ -1,3 +1,4 @@
+import type { TacticalPlan } from './tactics';
 /** Pure, deterministic combat rules. Coordinates are odd-r offset (q=column, r=row). */
 export interface Hex { q: number; r: number }
 export type Team = 'ally' | 'enemy';
@@ -61,6 +62,7 @@ export interface Unit {
   potency: number;
   /** The order this troop follows. Without one it holds position. */
   order?: TroopOrder;
+  tactic?: TacticalPlan;
   /** Estresse from an order replaced before it settled: a penalty to hit and to defense until the troop's next turn ends. */
   stress?: Stress;
 }
@@ -726,13 +728,16 @@ export interface OrderCheck {
 }
 /** Whether this unit can give the order now, and who would hear it. */
 export function checkOrder(s: BattleState, unit: Unit, id: OrderId, wanted: OrderTarget, focus?: OrderFocus): OrderCheck {
-  const info = orderInfo(id), target = info.targets.length === 1 ? info.targets[0] : wanted;
+  const info = orderInfo(id), target = wanted === 'todos' && info.targets.length === 1 ? info.targets[0] : wanted;
   const platoons = commandedPlatoons(s, unit), divisions = divisionsOf(target);
   const want = info.focus ? focus : undefined;
   const troops = platoons.flatMap(p => platoonTroops(s, p.id)).filter(u =>
     u.id !== unit.id && divisions.includes(divisionOf(u)) && distance(u.pos, unit.pos) <= unit.commandRange);
-  const changing = troops.filter(u => u.order?.id !== id || u.order.focus !== want);
-  const sudden = changing.filter(u => u.order && u.order.id !== id && !isSettled(s, u.order));
+  const changing = troops.filter(u => u.tactic || u.order?.id !== id || u.order.focus !== want);
+  const sudden = changing.filter(u => {
+    const previous = u.order ?? u.tactic;
+    return previous && u.order?.id !== id && s.round < previous.settledRound;
+  });
   let reason = '';
   if (s.outcome !== 'ongoing') reason = 'O combate terminou.';
   else if (!alive(unit) || !platoons.length) reason = 'Só quem comanda um pelotão dá ordens.';
@@ -766,10 +771,11 @@ export function issueOrder(s: BattleState, id: OrderId, wanted: OrderTarget = 't
   }
   let stressed = 0;
   for (const troop of check.changing) {
-    const old = troop.order;
+    const old = troop.order, previous = old ?? troop.tactic;
+    delete troop.tactic;
     // Same order, new target: the troops adjust without starting over.
     if (old?.id === id) { old.focus = focus; delete old.aimTargetId; delete old.aimRound; continue; }
-    const sudden = Boolean(old && !isSettled(s, old)), chain = sudden ? old!.chain + 1 : 0;
+    const sudden = check.sudden.includes(troop), chain = sudden ? previous!.chain + 1 : 0;
     troop.order = { id, givenRound: s.round, settledRound, potency: unit.potency, chain, strikeUsed: false, ...(focus ? { focus } : {}) };
     if (sudden) {
       // The stress lasts through the troop's next turn: this round if it has not acted yet, otherwise the next one.

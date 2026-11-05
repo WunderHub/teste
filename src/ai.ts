@@ -1,3 +1,4 @@
+import { updateTactic } from './tactics';
 /**
  * Battle AI, from docs/design-combate.md section 10. Pure and deterministic, like the engine.
  *
@@ -58,6 +59,7 @@ export function performAiAction(s: BattleState): ActionResult {
       if (result.ok) return result;
     }
   }
+  if (updateTactic(s, unit)) return endTurn(s);
   const profile = profileOf(s, unit);
   if (profile === 'arqueiros-preparar') return aimOrShoot(s, unit) ?? bestAction(s, unit, 'arqueiros-disparem');
   return bestAction(s, unit, profile);

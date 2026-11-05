@@ -818,9 +818,9 @@ describe('shouted orders', () => {
     const state = createBattle(1, 'campo-aberto');
     const leader = getActive(state)!;
     const before = JSON.stringify(state);
-    expect(shoutOrder(state, 'Guerreiros, xablau!', 'guerreiros')).toMatchObject({ ok: false, message: expect.stringMatching(/não entenderam.*PL devolvido\.$/) });
-    expect(shoutOrder(state, 'Arqueiros, procurem terreno elevado!', 'arqueiros')).toMatchObject({ ok: false, message: 'Este campo é plano: não há terreno elevado para ocupar. PL devolvido.' });
-    expect(shoutOrder(state, 'Arqueiros, fogo!', 'guerreiros')).toMatchObject({ ok: false, message: 'A ordem chama os arqueiros, mas você escolheu os guerreiros. PL devolvido.' });
+    expect(shoutOrder(state, 'Guerreiros, xablau!', 'guerreiros')).toMatchObject({ ok: false, message: expect.stringMatching(/não entenderam.*Nenhum PL gasto\.$/) });
+    expect(shoutOrder(state, 'Arqueiros, procurem terreno elevado!', 'arqueiros')).toMatchObject({ ok: false, message: 'Este campo é plano: não há terreno elevado para ocupar. Nenhum PL gasto.' });
+    expect(shoutOrder(state, 'Arqueiros, fogo!', 'guerreiros')).toMatchObject({ ok: false, message: 'A ordem chama os arqueiros, mas você escolheu os guerreiros. Nenhum PL gasto.' });
     expect(JSON.stringify(state)).toBe(before);
     const result = shoutOrder(state, '  Arqueiros, preparar disparo!  ', 'arqueiros');
     expect(result).toMatchObject({ ok: true, message: 'Duarte: "Arqueiros, preparar disparo!" (6 tropas).' });
