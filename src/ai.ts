@@ -43,8 +43,11 @@ const WEIGHTS = {
 };
 /** When set, every option the AI weighs is recorded with its score, for tuning and debugging. */
 export const AI_TRACE: { on: boolean; rows: Record<string, unknown>[] } = { on: false, rows: [] };
-/** How a unit decides: the order it follows, holding position, fighting on its own, or commanding a platoon. */
-export type Profile = OrderId | 'manter' | 'livre' | 'comando';
+/**
+ * How a unit decides: the order it follows, holding position, waiting for a plan's condition (holding position and
+ * striking only enemies next to it), fighting on its own, or commanding a platoon.
+ */
+export type Profile = OrderId | 'manter' | 'aguardar' | 'livre' | 'comando';
 
 /** One AI step for the active unit: give an order, move, attack, aim or end the turn. */
 export function performAiAction(s: BattleState): ActionResult {
@@ -59,8 +62,8 @@ export function performAiAction(s: BattleState): ActionResult {
       if (result.ok) return result;
     }
   }
-  if (updateTactic(s, unit)) return endTurn(s);
-  const profile = profileOf(s, unit);
+  // A troop waiting for its plan's condition holds position and only strikes enemies already next to it.
+  const profile = updateTactic(s, unit) ? 'aguardar' : profileOf(s, unit);
   if (profile === 'arqueiros-preparar') return aimOrShoot(s, unit) ?? bestAction(s, unit, 'arqueiros-disparem');
   return bestAction(s, unit, profile);
 }
@@ -104,7 +107,7 @@ interface Context {
 }
 
 /** Most hexes each profile lets a troop walk in one turn. */
-const MAX_STEPS: Partial<Record<Profile, number>> = { manter: 0, 'manter-posicao': 0, 'cessar-fogo': 0,
+const MAX_STEPS: Partial<Record<Profile, number>> = { manter: 0, aguardar: 0, 'manter-posicao': 0, 'cessar-fogo': 0,
   'linha-defensiva': 1, 'levantar-escudos': 1, 'avanco-devagar': 2 };
 /** Weight of the attack this turn, per profile. */
 const ATTACK_WEIGHT: Partial<Record<Profile, number>> = { atacar: 1.1, 'avanco-rapido': 1.1, livre: 1.1, flanquear: 1.1, recuar: 0.4 };
@@ -267,7 +270,9 @@ function evaluate(ctx: Context, option: Option): Plan {
     // "Cessar fogo!": the archers hold their arrows whatever the target.
     const swings = profile === 'cessar-fogo' ? 0 : swingsLeft(unit);
     if (swings) {
-      const reachableTargets = ctx.enemies.filter(e => distance(e.pos, unit.pos) <= unit.weapon.range && previewAttack(s, unit, e).allowed);
+      // Waiting for a plan's condition, a troop fights back against whoever is next to it but starts nothing at range.
+      const reach = profile === 'aguardar' ? 1 : unit.weapon.range;
+      const reachableTargets = ctx.enemies.filter(e => distance(e.pos, unit.pos) <= reach && previewAttack(s, unit, e).allowed);
       const closest = nearest(unit.pos, reachableTargets);
       // Orders that say "the nearest enemies" lean toward them; the AI still weighs who is worth hitting.
       const lean = ctx.focus ? 0.5 : profile === 'atacar' || profile === 'arqueiros-disparem' ? 2 : 0.5;
@@ -336,7 +341,8 @@ function orderCompliance(ctx: Context, option: Option, here: number, progress: n
     // Atacar! fights like a troop on its own, plus the first-strike bonus the engine adds to the blow.
     case 'livre':
     case 'atacar': return progress * 8 + (hasTarget ? 12 : 0);
-    case 'manter': return 0;
+    case 'manter':
+    case 'aguardar': return 0;
     // Stepping past the line is fine when it lands a blow: the advance keeps its PA for exactly that.
     case 'avanco-devagar': return Math.min(progress, 2) * 9 - (hasTarget ? 0 : ahead(1) * 14) + (hasTarget ? 6 : 0);
     case 'avanco-rapido': return progress * 12 + (hasTarget ? 10 : 0);

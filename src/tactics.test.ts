@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBattle } from './encounters';
-import { getActive, issueOrder, divisionOf, ORDERS, type Unit } from './game';
+import { distance, getActive, issueOrder, divisionOf, neighbors, ORDERS, tileAt, type ActionResult, type BattleState, type Unit } from './game';
 import { parseOrder, parseShout, shoutOrder, checkShout } from './commands';
 import { evaluateCondition, updateTactic } from './tactics';
 import { performAiAction } from './ai';
@@ -20,6 +20,20 @@ function read(text: string) {
   expect(p.ok, JSON.stringify(p)).toBe(true);
   if (!p.ok) throw Error(p.message);
   return p.directives[0];
+}
+
+/** A free, walkable hex next to the unit. */
+function free(s: BattleState, unit: Unit) {
+  const hex = neighbors(unit.pos).find(h => { const t = tileAt(s, h); return t && !t.obstacle && !s.units.some(u => u.pos.q === h.q && u.pos.r === h.r); });
+  if (!hex) throw Error('no free hex');
+  return hex;
+}
+/** Runs AI steps while the unit holds the turn and returns everything that happened. */
+function runTurn(s: BattleState, unit: Unit, active: (u: Unit) => void) {
+  active(unit);
+  const events: ActionResult['events'] = [];
+  for (let i = 0; i < 10 && getActive(s)?.id === unit.id; i++) events.push(...performAiAction(s).events);
+  return events;
 }
 
 describe('tactical language', () => {
@@ -85,7 +99,7 @@ describe('plans in battle', () => {
     s.round++; updateTactic(s, warrior);
     expect(warrior.order?.id).toBe('atacar'); expect(leader.pl).toBe(2); expect(warrior.stress).toBeUndefined();
   });
-  it('waits without moving or attacking until a suffix condition becomes true', () => {
+  it('waits in place, starting no fight, until a suffix condition becomes true', () => {
     const { s, leader, warrior, active } = field();
     expect(shoutOrder(s, 'Recuem se vida abaixo de 30%', 'guerreiros').ok).toBe(true);
     const pos = { ...warrior.pos }, hp = s.units.map(u => u.hp);
@@ -95,6 +109,37 @@ describe('plans in battle', () => {
     expect(warrior.tactic?.waiting).toBe(true); expect(warrior.order).toBeUndefined();
     s.round++; warrior.hp = 1; updateTactic(s, warrior);
     expect(warrior.order?.id).toBe('recuar'); expect(leader.pl).toBe(3);
+  });
+  it('holds position and fights back against an adjacent enemy while waiting', () => {
+    const { s, warrior, enemy, active } = field();
+    expect(shoutOrder(s, 'Recuem se vida abaixo de 30%', 'guerreiros').ok).toBe(true);
+    enemy.pos = free(s, warrior);
+    const pos = { ...warrior.pos }, events = runTurn(s, warrior, active);
+    expect(warrior.pos).toEqual(pos);
+    expect(events.some(e => e.type === 'attack' && e.unitId === warrior.id && e.targetId === enemy.id)).toBe(true);
+    expect(warrior.tactic?.waiting).toBe(true); expect(warrior.order).toBeUndefined();
+  });
+  it('does not shoot at range while waiting for the condition', () => {
+    const { s, archer, enemy, active } = field();
+    s.tiles.forEach(t => delete t.obstacle);
+    expect(shoutOrder(s, 'Disparem quando inimigos a até 2 hex', 'arqueiros').ok).toBe(true);
+    enemy.pos = { q: archer.pos.q + 4, r: archer.pos.r };
+    expect(s.units.some(u => u !== enemy && distance(u.pos, enemy.pos) === 0)).toBe(false);
+    const pos = { ...archer.pos }, events = runTurn(s, archer, active);
+    expect(archer.pos).toEqual(pos);
+    expect(events.some(e => e.type === 'attack' && e.unitId === archer.id)).toBe(false);
+  });
+  it('counts as waiting right after the shout only without an alternative and with a false condition', () => {
+    const { s, warrior } = field();
+    expect(shoutOrder(s, 'Se vida abaixo de 30%, recuem; senão, ataquem', 'guerreiros').ok).toBe(true);
+    expect(warrior.tactic?.waiting).toBe(false);
+    const other = field();
+    expect(shoutOrder(other.s, 'Recuem se vida abaixo de 30%', 'guerreiros').ok).toBe(true);
+    expect(other.warrior.tactic?.waiting).toBe(true);
+    const hurt = field();
+    hurt.warrior.hp = 1;
+    expect(shoutOrder(hurt.s, 'Recuem se vida abaixo de 30%', 'guerreiros').ok).toBe(true);
+    expect(hurt.warrior.tactic?.waiting).toBe(false);
   });
   it('latches WHEN but re-evaluates IF on subsequent rounds', () => {
     for (const [word, latched] of [['Quando', true], ['Se', false]] as const) {

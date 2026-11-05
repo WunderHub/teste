@@ -9,7 +9,7 @@ Escolha o grupo, escreva e confira a prévia. Enter envia; Shift+Enter permite q
 | Grito | Resultado |
 | --- | --- |
 | `Se a vida ficar abaixo de 30%, recuem; senão, ataquem o líder` | Cada tropa ferida recua; as demais priorizam atacar o líder inimigo. Custa 4 PL. |
-| `Recuem se moral baixa` | Aguarda sem agir até a própria moral ficar em 2 ou menos. Volta a aguardar se a moral melhorar. Custa 3 PL. |
+| `Recuem se moral baixa` | Mantém a posição até a própria moral ficar em 2 ou menos, golpeando só quem estiver colado. Volta a aguardar se a moral melhorar. Custa 3 PL. |
 | `Quando inimigos no alcance, disparem` | Arqueiros aguardam uma oportunidade de tiro. Após o gatilho, mantêm a ordem de disparar até nova ordem. Custa 2 PL. |
 | `Arqueiros, avancem até os inimigos entrarem no alcance, depois disparem` | Avançam devagar enquanto não houver alvo; quando houver, passam a disparar, sem retornar à etapa anterior. Custa 2 PL. |
 | `Se vida abaixo de 30% ou moral baixa e não fadiga acima de 70%, recuem` | Recuar quando vida < 30%, ou quando moral baixa **e** fadiga ≤ 70%. A prévia mostra o agrupamento. |
@@ -35,7 +35,7 @@ Escolha o grupo, escreva e confira a prévia. Enter envia; Shift+Enter permite q
 
 Cada tropa avalia a condição no início da própria vez, uma vez por rodada. Caminhar para entrar no alcance durante a vez não aciona a próxima etapa até a próxima vez. A posição, a vida e a moral são avaliadas separadamente para cada soldado; o grupo não espera uma decisão coletiva.
 
-Sem alternativa e com condição falsa, a tropa encerra a vez sem mover ou atacar voluntariamente. As reações automáticas de combate seguem as regras existentes. Condições recorrentes podem voltar ao ramo anterior; transições “quando” e “até… depois” não voltam.
+Sem alternativa e com condição falsa, a tropa aguarda mantendo a posição: não anda e não ataca à distância, mas golpeia inimigos colados nela (revida). Arqueiro alcançado em corpo a corpo pode recuar até 2 hex, como em qualquer ordem. As reações automáticas de combate seguem as regras existentes. Condições recorrentes podem voltar ao ramo anterior; transições “quando” e “até… depois” não voltam.
 
 O plano substitui a ordem anterior das tropas que o ouviram. O custo é o maior custo entre as alternativas de cada plano; planos de grupos distintos somam. O pagamento ocorre uma vez, ao gritar. Todas as cláusulas são validadas antes de qualquer alteração; erro, incompatibilidade, sobreposição de destinatários ou PL insuficiente não alteram o combate. Repetir o mesmo plano nas mesmas tropas não cobra novamente.
 
@@ -45,7 +45,7 @@ Substituir uma ordem/plano ainda não assentado mantém as regras de estresse, i
 
 ## Interface e limites
 
-A prévia mostra condição interpretada, alternativa, destinatários, custo e tropas sob estresse. O campo aceita várias linhas; o painel mostra quantas tropas têm plano e quantas aguardam. A marca `?` identifica tropas aguardando; após a ativação, aparece a letra da ação. Os atributos da tropa mostram o plano completo.
+A prévia mostra condição interpretada, alternativa, destinatários, custo e tropas sob estresse. O campo aceita várias linhas; o painel mostra quantas tropas têm plano e quantas aguardam. Logo após o grito, só conta como aguardando quem não tem alternativa e cuja condição ainda é falsa. A marca `?` identifica tropas aguardando; após a ativação, aparece a letra da ação. Os atributos da tropa mostram o plano completo.
 
 Comandos vagos como “se puderem”, gatilhos externos como “quando eu mandar”, coordenadas, direções específicas, sequências sem condição de transição, regras de altura e condições desconhecidas são recusados. Não há nova habilidade, “recuperar”, alteração de terreno ou geração de arte nesta implementação.
 
