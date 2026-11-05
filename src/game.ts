@@ -116,6 +116,12 @@ export interface BattleState {
   activatedRound: Record<string, number>;
   waitPenaltyNextRound: Record<string, boolean>;
   adjacentThreats: Record<string, number>;
+  /** Platoons whose members act one by one, by their own initiative, since someone in them struck or was struck. */
+  inCombat: Record<string, boolean>;
+  /** Last round in which someone in each platoon struck or was struck. */
+  contactRound: Record<string, number>;
+  /** Each unit's initiative for the current round, fixed when the round starts. */
+  roundInitiative: Record<string, number>;
 }
 export interface BattleEvent {
   type: 'move' | 'attack' | 'death' | 'flee' | 'turn' | 'info' | 'order';
@@ -389,6 +395,7 @@ function moraleCheck(s: BattleState, unit: Unit, positive: boolean, events: Batt
 function resolveStrike(s: BattleState, unit: Unit, target: Unit, events: BattleEvent[], reaction = false): boolean {
   const chance = hitChance(s, unit, target, reaction), hit = roll(s, 1, 100) <= chance;
   s.lastClashRound = s.round;
+  enterCombat(s, [unit, target], events);
   if (!hit) {
     emit(s, events, { type: 'attack', unitId: unit.id, targetId: target.id, hit: false, damage: 0,
       message: `${unit.name} ${reaction ? 'reage, mas erra' : 'erra o ataque contra'} ${target.name}.` });
@@ -454,6 +461,59 @@ function activate(s: BattleState, events: BattleEvent[]): void {
   emit(s, events, { type: 'turn', unitId: unit.id, message: `Turno de ${unit.name}.` });
 }
 
+/**
+ * The platoon whose group turn this unit takes part in: a platoon with its leader on the field acts as one block
+ * (the leader, then the troops) until someone in it strikes or is struck. Fleeing units always act alone.
+ */
+export function groupTurnOf(s: BattleState, u: Unit): Platoon | undefined {
+  const platoon = platoonOf(s, u);
+  if (!platoon?.leaderId || s.inCombat[platoon.id] || u.morale === 0 || !alive(u)) return undefined;
+  const leader = s.units.find(v => v.id === platoon.leaderId);
+  return leader && alive(leader) && leader.morale > 0 ? platoon : undefined;
+}
+
+/**
+ * Turn order: by initiative, where a platoon out of combat takes one slot at its leader's initiative (leader first, then
+ * its troops by their own). Ties go to a coin flip fixed by the seed and the round, so neither side always moves first.
+ * Units that waited stay at the back, in the order they waited.
+ */
+function sortTurns(s: BattleState, ids: string[]): string[] {
+  const coin = (id: string): number => {
+    let h = (s.seed ^ Math.imul(s.round, 0x9e3779b1)) >>> 0;
+    for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 0x01000193) >>> 0;
+    return h;
+  };
+  const units = ids.map(id => s.units.find(u => u.id === id)!).filter(Boolean);
+  // Whoever is fleeing goes last.
+  const initiative = (id: string): number => (s.roundInitiative[id] ?? 0) - (units.find(u => u.id === id)?.morale === 0 ? 1000 : 0);
+  const slot = (u: Unit) => {
+    const platoon = groupTurnOf(s, u), head = platoon ? platoon.leaderId! : u.id;
+    return { head, rank: head === u.id ? 0 : 1 };
+  };
+  const waited = units.filter(u => u.waited), ready = units.filter(u => !u.waited);
+  const slots = new Map(ready.map(u => [u.id, slot(u)]));
+  ready.sort((a, b) => {
+    const x = slots.get(a.id)!, y = slots.get(b.id)!;
+    return initiative(y.head) - initiative(x.head) || coin(x.head) - coin(y.head) || x.head.localeCompare(y.head)
+      || x.rank - y.rank || initiative(b.id) - initiative(a.id) || coin(a.id) - coin(b.id) || a.id.localeCompare(b.id);
+  });
+  return [...ready, ...waited].map(u => u.id);
+}
+
+/** A blow puts the platoons of both sides in combat: who has not acted yet this round now acts by their own initiative. */
+function enterCombat(s: BattleState, units: Unit[], events: BattleEvent[]): void {
+  let changed = false;
+  for (const u of units) {
+    const platoon = platoonOf(s, u);
+    if (!platoon) continue;
+    s.contactRound[platoon.id] = s.round;
+    if (s.inCombat[platoon.id]) continue;
+    s.inCombat[platoon.id] = true; changed = true;
+    emit(s, events, { type: 'info', message: `${platoon.name} entra em combate: cada um age pela própria iniciativa.` });
+  }
+  if (changed && s.queue.length > 1) s.queue = [s.queue[0], ...sortTurns(s, s.queue.slice(1))];
+}
+
 function startRound(s: BattleState, events: BattleEvent[]): void {
   if (checkOutcome(s, events)) return;
   s.round++;
@@ -461,15 +521,17 @@ function startRound(s: BattleState, events: BattleEvent[]): void {
   for (const unit of s.units) if (unit.stress && unit.stress.round < s.round) delete unit.stress;
   // A side whose commanders were all fleeing when the last leader fell gets a commander once someone holds.
   for (const team of ['ally', 'enemy'] as const) appointInterim(s, team, { q: 0, r: 0 }, events);
-  const initiative = (u: Unit): number => Math.max(0, u.initiative - u.fatigue) * (s.waitPenaltyNextRound[u.id] ? 0.75 : 1) - (u.morale === 0 ? 1000 : 0);
-  // Ties go to a coin flip fixed by the seed and the round, so neither side always moves first.
-  const coin = (u: Unit): number => {
-    let h = (s.seed ^ Math.imul(s.round, 0x9e3779b1)) >>> 0;
-    for (let i = 0; i < u.id.length; i++) h = Math.imul(h ^ u.id.charCodeAt(i), 0x01000193) >>> 0;
-    return h;
-  };
-  s.queue = s.units.filter(alive).sort((a, b) => initiative(b) - initiative(a) || coin(a) - coin(b) || a.id.localeCompare(b.id)).map(u => u.id);
+  // A platoon goes back to acting as one group after a whole round with no blows and nobody next to an enemy.
+  for (const platoon of s.platoons) {
+    if (!s.inCombat[platoon.id] || (s.contactRound[platoon.id] ?? 0) >= s.round - 1) continue;
+    if (s.units.some(u => alive(u) && u.platoonId === platoon.id && adjacentEnemies(s, u).length)) continue;
+    s.inCombat[platoon.id] = false;
+    emit(s, events, { type: 'info', message: `${platoon.name} volta a agir em grupo.` });
+  }
+  s.roundInitiative = {};
+  for (const u of s.units.filter(alive)) s.roundInitiative[u.id] = Math.max(0, u.initiative - u.fatigue) * (s.waitPenaltyNextRound[u.id] ? 0.75 : 1);
   for (const unit of s.units) unit.waited = false;
+  s.queue = sortTurns(s, s.units.filter(alive).map(u => u.id));
   s.waitPenaltyNextRound = {};
   emit(s, events, { type: 'info', message: `Rodada ${s.round}.` });
   activate(s, events);
@@ -846,7 +908,7 @@ export function startBattle(seed: number, setup: BattleSetup): BattleState {
   const normalizedSeed = seed >>> 0 || 1;
   const s: BattleState = { encounter, width, height, seed: normalizedSeed, rngState: normalizedSeed, round: 0, tiles, units, platoons,
     queue: [], outcome: 'ongoing', log: [], activatedRound: {}, waitPenaltyNextRound: {}, adjacentThreats: {},
-    movedRound: {}, lastClashRound: 0 };
+    movedRound: {}, lastClashRound: 0, inCombat: {}, contactRound: {}, roundInitiative: {} };
   for (const u of units) s.adjacentThreats[u.id] = adjacentEnemies(s, u).length;
   startRound(s, []);
   return s;

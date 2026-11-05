@@ -283,6 +283,8 @@ flowchart TD
 
 ## 8. Turnos: grupos e iniciativa
 
+Implementado na fase 3 (versão 0.7), conforme a proposta abaixo. O pelotão só age em grupo enquanto tem o líder em campo e firme; sem líder (inclusive com comandante interino), cada um age pela própria iniciativa. Quem foge sempre age sozinho, no fim da fila.
+
 **Decidido**
 
 - O líder e o seu grupo agem todos de uma vez.
@@ -422,7 +424,7 @@ A IA nunca trapaceia (seção 10, início). A régua de aprovação:
 1. ✅ Modelo de dados (líder, tropa, pelotão, nota de atributo), mapa maior com câmera e um encontro de teste de 20 contra 20, com 1 líder por lado.
 2. ✅ Aba de comando: ordens, PL, recarga, alcance e a IA de tropa seguindo ordens. Entraram também a IA de ordens do líder inimigo (versão 1), o comandante interino e a regra do Líder Supremo (a batalha de teste passou a usar um líder comum). Para o torneio de IA ser justo, a batalha de teste ficou espelhada (mesmo terreno, mesmo bloco de formação dentro dos 5 hex de alcance) e os saqueadores do campo ganharam o cutelo de saque, que bate como a maça. Empates de iniciativa passaram a ser sorteados pela semente, sem favorecer um lado.
    - ✅ **Ordens gritadas** (versão 0.5): a lista de botões com recarga deu lugar à caixa de texto, com o leitor de ordens do jogo (`src/commands.ts`), 13 ordens, alvo preferido, assentamento e estresse.
-3. Vez de grupo e passagem para iniciativa no contato.
+3. ✅ Vez de grupo e passagem para iniciativa no contato. A tela anima as marchas de uma vez de grupo juntas, o que reduz bastante a espera nas rodadas de aproximação.
 4. Tela de preparação (escolher os líderes, com o Supremo só como último recurso, e distribuir as tropas), regra de 20 por líder (Sobrecarregado e Pressão de liderança), transferências e sucessão entre líderes.
 5. IA de líder versão 2 (simulação), estratégia do lado, escala de 100 contra 100, otimização e Web Worker.
 6. Habilidades das subclasses e traços das tropas.
@@ -467,3 +469,4 @@ Cada pergunta já tem uma proposta. Se o chefe não mudar, a proposta vale.
 - **0.4 (2026-11-01)**: arqueiros atiram por cima da linha; flecha que erra pode acertar aliado em contato com o alvo, e a IA segura o tiro quando não compensa (pedido do chefe).
 - **0.5 (2026-11-02)**: ordens gritadas no lugar da lista de ordens com recarga (decisão do chefe). O player escolhe o grupo e escreve a ordem; o leitor do jogo entende 13 ordens, sinônimos e erros de digitação, e devolve o PL quando não entende. A ordem vale até ser trocada, só dá bônus depois de assentar por um turno inteiro, e trocar antes disso causa estresse.
 - **0.6 (2026-11-05)**: planos condicionais (`se… senão`, `quando…`, `até… depois` e grupos separados por ponto e vírgula), detalhados em [ordens-condicionais.md](ordens-condicionais.md). A tropa que aguarda a condição de um plano sem "senão" mantém a posição e revida quem estiver colado nela, em vez de ficar parada sem lutar (pedido do chefe).
+- **0.7 (2026-11-05)**: fase 3. Pelotão fora de combate age em bloco na vez do líder; um golpe dado ou sofrido põe os dois pelotões em combate e quem não agiu passa a agir pela própria iniciativa; uma rodada sem golpes e sem ninguém colado a um inimigo devolve o pelotão à vez de grupo.

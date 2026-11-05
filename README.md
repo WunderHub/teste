@@ -2,7 +2,7 @@
 
 Protótipo original de combate tático em hexágonos, feito com **Phaser 3 + TypeScript + Vite**. No Campo das Salinas, Duarte e seu pelotão de 20 tropas enfrentam o bando do Senhor da Guerra, também com 20. Você comanda só o líder; as tropas cumprem as ordens dele, pela IA. O Líder Supremo, personagem do jogador, fica fora da batalha: se ele cair em campo, a campanha acaba. As tropas aparecem como bustos pintados (cabeça e tronco, arma e escudo na frente), com a cor do lado no tecido e no escudo; obstáculos e ícones ainda são vetoriais provisórios. A interface fica sobreposta ao próprio campo.
 
-O design completo do combate (líderes, pelotões, ordens e turnos em grupo) está em [`docs/design-combate.md`](docs/design-combate.md). Esta versão implementa as fases 1 e 2 dele.
+O design completo do combate (líderes, pelotões, ordens e turnos em grupo) está em [`docs/design-combate.md`](docs/design-combate.md). Esta versão implementa as fases 1, 2 e 3 dele.
 
 ## Próxima direção visual e de terreno
 
@@ -40,7 +40,7 @@ npm run preview  # serve a versão compilada
 - **V** ou o botão **»** mudam a velocidade das tropas (1×, 2× ou 4×). Ações longe da câmera acontecem na hora.
 - O botão **Ajuda** explica as regras durante a partida. **Reiniciar** repete o encontro com a mesma semente para comparar estratégias.
 
-Cada lado tem 1 líder, 14 guerreiros (maça ou lança do nosso lado, cutelo ou lança do outro) e 6 arqueiros, em bloco: escudos na frente, lanças atrás, arcos no fundo e o líder no meio, todos dentro do alcance de comando. Maça e cutelo são de uma mão, então quem os usa carrega escudo. Os dois líderes são Líderes de Combate, com atributos 20% acima do padrão. Os dois lados são espelhados, com o mesmo terreno e o mesmo poder de fogo. O cartão de cada combatente mostra a subclasse, o líder que ele segue, a ordem que cumpre e a nota de atributo (soma dos oito atributos base). A ordem dos turnos é determinada por iniciativa e fadiga, intercalando aliados e inimigos; empates são decididos por sorteio fixo da semente. Quando o último líder de um lado cai, a tropa de maior nota assume o comando interino, sempre pela IA, e a batalha segue sozinha.
+Cada lado tem 1 líder, 14 guerreiros (maça ou lança do nosso lado, cutelo ou lança do outro) e 6 arqueiros, em bloco: escudos na frente, lanças atrás, arcos no fundo e o líder no meio, todos dentro do alcance de comando. Maça e cutelo são de uma mão, então quem os usa carrega escudo. Os dois líderes são Líderes de Combate, com atributos 20% acima do padrão. Os dois lados são espelhados, com o mesmo terreno e o mesmo poder de fogo. O cartão de cada combatente mostra a subclasse, o líder que ele segue, a ordem que cumpre e a nota de atributo (soma dos oito atributos base). Fora de combate, cada pelotão age como um bloco na **vez de grupo**: o líder primeiro, depois as tropas, e as marchas do grupo aparecem juntas na tela. O bloco entra na fila pela iniciativa do líder. Quando alguém do pelotão ataca ou é atacado, ele **entra em combate**: quem ainda não agiu na rodada passa a agir pela própria iniciativa (iniciativa menos fadiga), intercalando aliados e inimigos, e isso vale para os dois pelotões envolvidos. Depois de uma rodada inteira sem golpes e sem ninguém colado a um inimigo, o pelotão volta à vez de grupo. Empates são decididos por sorteio fixo da semente. Quando o último líder de um lado cai, a tropa de maior nota assume o comando interino, sempre pela IA, e a batalha segue sozinha.
 
 ## Regras deste protótipo
 

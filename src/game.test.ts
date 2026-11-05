@@ -967,3 +967,63 @@ describe('the troop AI follows orders', () => {
     expect(seeds.filter(seed => play(seed, 'enemy')).length).toBeGreaterThanOrEqual(7);
   }, 120000);
 });
+
+describe('group turns and initiative on contact', () => {
+  /** Positions of a platoon's members in the queue. */
+  const slots = (state: BattleState, platoonId: string) =>
+    state.queue.map((id, i) => [id, i] as const).filter(([id]) => state.units.find(u => u.id === id)!.platoonId === platoonId).map(([, i]) => i);
+  const contiguous = (indexes: number[]) => indexes.every((v, i) => i === 0 || v === indexes[i - 1] + 1);
+
+  it('a platoon out of combat takes one slot: its leader first, then its troops', () => {
+    const state = createBattle(731, 'campo-aberto');
+    for (const platoon of state.platoons) {
+      const indexes = slots(state, platoon.id);
+      expect(indexes).toHaveLength(21);
+      expect(contiguous(indexes), platoon.id).toBe(true);
+      expect(state.queue[indexes[0]]).toBe(platoon.leaderId);
+    }
+    // The slot follows the leader's initiative: Duarte (95) goes before the Senhor da Guerra (92).
+    expect(state.queue[0]).toBe('duarte');
+  });
+
+  it('a blow splits both platoons: who has not acted goes by their own initiative', () => {
+    const state = createBattle(731, 'campo-aberto');
+    const troop = state.units.find(u => u.platoonId === 'pelotao-duarte' && u.role === 'troop' && u.weapon.kind === 'melee')!;
+    const enemy = state.units.find(u => u.platoonId === 'bando-senhor' && u.role === 'troop' && u.weapon.kind === 'melee')!;
+    endTurn(state); // Duarte has acted.
+    while (getActive(state)!.id !== troop.id) endTurn(state);
+    const acted = state.units.filter(u => u.platoonId === 'pelotao-duarte' && !state.queue.includes(u.id)).map(u => u.id);
+    enemy.pos = neighbors(troop.pos).find(h => tileAt(state, h) && !tileAt(state, h)!.obstacle && !state.units.some(u => key(u.pos) === key(h)))!;
+    expect(attack(state, enemy.id).ok).toBe(true);
+    expect(state.inCombat).toMatchObject({ 'pelotao-duarte': true, 'bando-senhor': true });
+    expect(state.queue[0]).toBe(troop.id);
+    for (const id of acted) expect(state.queue).not.toContain(id);
+    // Everyone left in the queue is now ordered by their own initiative, allies and enemies interleaved.
+    const rest = state.queue.slice(1).map(id => state.units.find(u => u.id === id)!).filter(u => u.morale > 0 && !u.waited);
+    const initiative = rest.map(u => state.roundInitiative[u.id]);
+    expect(initiative).toEqual([...initiative].sort((a, b) => b - a));
+    expect(contiguous(slots(state, 'bando-senhor'))).toBe(false);
+  });
+
+  it('goes back to group turns after a whole round without blows and with nobody next to an enemy', () => {
+    const state = createBattle(731, 'campo-aberto');
+    state.inCombat['pelotao-duarte'] = true; state.contactRound['pelotao-duarte'] = state.round;
+    const finishRound = () => { const round = state.round; while (state.round === round) endTurn(state); };
+    finishRound();
+    expect(state.inCombat['pelotao-duarte']).toBe(true); // There was a blow in round 1.
+    expect(contiguous(slots(state, 'pelotao-duarte'))).toBe(false);
+    finishRound();
+    expect(state.inCombat['pelotao-duarte']).toBe(false);
+    expect(contiguous(slots(state, 'pelotao-duarte'))).toBe(true);
+  });
+
+  it('stays in combat while someone is next to an enemy, even without blows', () => {
+    const state = createBattle(731, 'campo-aberto');
+    const troop = state.units.find(u => u.platoonId === 'pelotao-duarte' && u.role === 'troop')!;
+    const enemy = state.units.find(u => u.platoonId === 'bando-senhor' && u.role === 'troop')!;
+    enemy.pos = neighbors(troop.pos).find(h => tileAt(state, h) && !tileAt(state, h)!.obstacle && !state.units.some(u => key(u.pos) === key(h)))!;
+    state.inCombat['pelotao-duarte'] = true; state.contactRound['pelotao-duarte'] = state.round;
+    for (let i = 0; i < 3; i++) { const round = state.round; while (state.round === round) endTurn(state); }
+    expect(state.inCombat['pelotao-duarte']).toBe(true);
+  });
+});
