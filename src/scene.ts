@@ -7,10 +7,13 @@ import {
 import { createBattle } from './encounters';
 import { performAiAction } from './ai';
 import { shoutOrder } from './commands';
+import { FIGURE_ANCHOR, FIGURE_ASPECT, FIGURE_KEYS, figureOf, figureUrl } from './figures';
 import { CombatUI, ORDER_GROUPS, previewShout, type Composer, type UIView } from './ui';
 
 /** The HUD was laid out for a 1440×900 screen; that size still sets the default zoom. */
 const W = 1440, H = 900, R = 40;
+/** Height of a bust on the field, in world pixels; the waist stands just below the hex center. */
+const FIGURE_H = 108;
 const DX = Math.sqrt(3) * R, DY = R * 1.5;
 const MARGIN_X = 140, MARGIN_Y = 130;
 /** How far the painted ground extends past the board on each side. */
@@ -75,8 +78,9 @@ export class CombatScene extends Phaser.Scene {
 
   constructor() { super('Combat'); }
   preload() {
-    for (const name of ['iria', 'tome', 'nara', 'raider', 'husk', 'captain', 'warlord', 'rocks', 'ruin', 'deadtree', 'death'])
+    for (const name of ['rocks', 'ruin', 'deadtree', 'death'])
       this.load.svg(name, `${import.meta.env.BASE_URL}assets/${name}.svg`, { scale: 2 });
+    for (const key of FIGURE_KEYS) this.load.image(key, figureUrl(key));
   }
   create() {
     this.state = createBattle(SEED, 'campo-aberto');
@@ -227,24 +231,25 @@ export class CombatScene extends Phaser.Scene {
   }
   /** A pennant over the head marks leaders, so the player can find the units they command. */
   private drawPennant(graphics: Phaser.GameObjects.Graphics, x: number, y: number, team: Unit['team']) {
-    graphics.lineStyle(2, 0x2a2318, 1).lineBetween(x + 25, y - 34, x + 25, y - 112);
-    graphics.fillStyle(COLORS[team], 1).fillTriangle(x + 26, y - 112, x + 52, y - 104, x + 26, y - 95);
-    graphics.lineStyle(1.5, COLORS.gold, 1).strokeTriangle(x + 26, y - 112, x + 52, y - 104, x + 26, y - 95);
-    graphics.fillStyle(COLORS.gold, 1).fillCircle(x + 25, y - 113, 2.5);
+    // Taller than the busts, so the flag flies over the heads of the row behind instead of against their cloth.
+    graphics.lineStyle(2.5, 0x2a2318, 1).lineBetween(x + 27, y - 30, x + 27, y - 134);
+    graphics.fillStyle(COLORS[team], 1).fillTriangle(x + 28, y - 134, x + 62, y - 123, x + 28, y - 112);
+    graphics.lineStyle(2, COLORS.gold, 1).strokeTriangle(x + 28, y - 134, x + 62, y - 123, x + 28, y - 112);
+    graphics.fillStyle(COLORS.gold, 1).fillCircle(x + 27, y - 135, 3);
   }
   private syncPawns() {
     const active = getActive(this.state);
     for (const unit of this.state.units) {
       let pawn = this.pawns.get(unit.id); const p = hexToWorld(unit.pos);
       if (!pawn) {
-        pawn = { image: this.add.image(p.x, p.y + 7, unit.asset).setOrigin(0.5, 0.94).setDisplaySize(82, 100), base: this.add.graphics(), flag: this.add.graphics(), label: this.add.text(p.x, p.y + 23, '', { fontFamily: 'Arial', fontSize: '12px', color: '#e5dec9', stroke: '#20271e', strokeThickness: 4 }).setOrigin(0.5, 0), bar: this.add.graphics(),
+        pawn = { image: this.add.image(p.x, p.y + 7, figureOf(unit)), base: this.add.graphics(), flag: this.add.graphics(), label: this.add.text(p.x, p.y + 23, '', { fontFamily: 'Arial', fontSize: '12px', color: '#e5dec9', stroke: '#20271e', strokeThickness: 4 }).setOrigin(0.5, 0), bar: this.add.graphics(),
           mark: this.add.text(0, 0, '', { fontFamily: 'Arial', fontSize: '11px', fontStyle: 'bold', color: '#e2c99f', backgroundColor: '#18211ee6', padding: { x: 4, y: 1 } }).setOrigin(0.5).setVisible(false) };
         this.pawns.set(unit.id, pawn);
       }
       pawn.base.clear(); pawn.bar.clear(); pawn.flag.clear(); pawn.mark.setVisible(false);
       if (unit.escaped) { pawn.image.setVisible(false); pawn.label.setVisible(false); continue; }
       pawn.image.setVisible(true).setPosition(p.x, p.y + 7).setDepth(100 + p.y);
-      if (unit.dead) { pawn.image.setTexture('death').setDisplaySize(62, 76).setAlpha(0.65).setDepth(5); pawn.label.setVisible(false); continue; }
+      if (unit.dead) { pawn.image.setTexture('death').setOrigin(0.5, 0.94).setDisplaySize(62, 76).setAlpha(0.65).setDepth(5); pawn.label.setVisible(false); continue; }
       if (unit.order && unit.morale > 0) {
         // Faded while the order settles; a "!" while the troop is under stress.
         // Worn on the shoulder, just above the own sprite: the rows in front never cover that spot.
@@ -255,7 +260,8 @@ export class CombatScene extends Phaser.Scene {
       if (unit.tactic?.waiting && unit.morale > 0) {
         pawn.mark.setText('?').setPosition(p.x - 23, p.y - 40).setDepth(101 + p.y).setVisible(true).setAlpha(0.8).setColor('#e2c99f');
       }
-      pawn.image.setTexture(unit.asset).setDisplaySize(82, 100).setAlpha(unit.morale === 0 ? 0.68 : 1);
+      pawn.image.setTexture(figureOf(unit)).setOrigin(FIGURE_ANCHOR.x, FIGURE_ANCHOR.y).setDisplaySize(FIGURE_H * FIGURE_ASPECT, FIGURE_H)
+        .setAlpha(unit.morale === 0 ? 0.68 : 1);
       const selected = unit.id === active?.id, hovered = unit.id === this.view.hoveredId, leader = unit.role === 'leader';
       const color = selected ? COLORS.gold : COLORS[unit.team];
       pawn.base.setDepth(4).fillStyle(0x131b15, 0.5).fillEllipse(p.x, p.y + 6, 72, 28);
@@ -270,7 +276,7 @@ export class CombatScene extends Phaser.Scene {
       if (unit.weapon.kind === 'ranged') pawn.base.fillStyle(COLORS[unit.team], 0.8).fillTriangle(p.x + 25, p.y - 1, p.x + 34, p.y + 3, p.x + 25, p.y + 7);
     }
     this.activeMarker.setVisible(!!active && this.state.outcome === 'ongoing');
-    if (active) { const p = hexToWorld(active.pos); this.activeMarker.setPosition(p.x, p.y - (active.role === 'leader' ? 124 : 106)); }
+    if (active) { const p = hexToWorld(active.pos); this.activeMarker.setPosition(p.x, p.y - (active.role === 'leader' ? 146 : 106)); }
   }
   refresh() {
     const active = getActive(this.state);

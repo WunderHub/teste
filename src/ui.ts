@@ -4,6 +4,7 @@ import {
   type BattleState, type Division, type OrderCheck, type OrderTarget, type Unit,
 } from './game';
 import { focusLabel, MAX_SHOUT_LENGTH, checkShout } from './commands';
+import { figureOf, figureUrl } from './figures';
 import { ENCOUNTER_NAMES } from './encounters';
 
 type BattleUnit = BattleState['units'][number];
@@ -188,7 +189,7 @@ export class CombatUI {
       </section>
 
       <section class="unit-card hud-panel" aria-label="Atributos da unidade ativa" data-ui="active-card">
-        <div class="active-portrait"><img data-ui="active-image" src="${assetUrl('iria')}" alt="" draggable="false"><span class="portrait-flourish" aria-hidden="true"></span></div>
+        <div class="active-portrait"><img data-ui="active-image" src="${figureUrl('guerreiro-escudo-ally')}" alt="" draggable="false"><span class="portrait-flourish" aria-hidden="true"></span></div>
         <div class="unit-card-content">
           <div class="unit-name-row"><div><p class="eyebrow" data-ui="active-caption">SEU TURNO</p><h1 data-ui="active-name">Iria</h1></div><span class="morale-chip" data-ui="morale" title="Moral"><span class="morale-mark" aria-hidden="true">◆</span><span data-ui="morale-label">Firme</span></span></div>
           <p class="weapon-name" data-ui="weapon">Escudo e lâmina</p>
@@ -218,7 +219,7 @@ export class CombatUI {
       </section>
 
       <aside class="target-card hud-panel" aria-label="Unidade sob o cursor" data-ui="target-card" hidden>
-        <div class="target-heading"><img data-ui="target-image" src="${assetUrl('raider')}" alt="" draggable="false"><div><p class="eyebrow" data-ui="target-team">INIMIGO</p><h2 data-ui="target-name">Saqueador</h2><p class="target-morale" data-ui="target-morale">Firme</p></div></div>
+        <div class="target-heading"><img data-ui="target-image" src="${figureUrl('guerreiro-escudo-enemy')}" alt="" draggable="false"><div><p class="eyebrow" data-ui="target-team">INIMIGO</p><h2 data-ui="target-name">Saqueador</h2><p class="target-morale" data-ui="target-morale">Firme</p></div></div>
         <p class="target-role" data-ui="target-role"></p>
         <p class="target-order" data-ui="target-order"></p>
         <div class="target-stats"><span title="Vida">${icon('heart')}<strong data-ui="target-hp"></strong></span><span title="Armadura da cabeça">${icon('helmet')}<strong data-ui="target-head"></strong></span><span title="Armadura do corpo">${icon('shield')}<strong data-ui="target-body"></strong></span></div>
@@ -318,7 +319,7 @@ export class CombatUI {
   }
 
   private updateActive(state: BattleState, unit: BattleUnit, view: UIView): void {
-    this.image('active-image', unit.asset);
+    this.figure('active-image', unit);
     this.text('active-name', unit.name);
     this.text('active-caption', unit.team === 'enemy' ? 'TURNO INIMIGO' : unit.morale === 0 ? 'EM RETIRADA'
       : !isPlayerControlled(unit) ? 'TROPA ALIADA' : view.busy ? 'EM AÇÃO' : 'SEU TURNO');
@@ -442,7 +443,8 @@ export class CombatUI {
       token.setAttribute('aria-current', index === 0 ? 'step' : 'false');
       token.title = `${unit.name} · ${unit.team === 'ally' ? 'Aliado' : 'Inimigo'} · ${unit.hp}/${unit.maxHp} vida · ${MORALE[unit.morale]}`;
       const image = token.querySelector<HTMLImageElement>('img')!;
-      if (image.getAttribute('src') !== assetUrl(unit.asset)) image.src = assetUrl(unit.asset);
+      const src = figureUrl(figureOf(unit));
+      if (image.getAttribute('src') !== src) image.src = src;
       const name = token.querySelector<HTMLElement>('.turn-name')!;
       if (name.textContent !== unit.name) name.textContent = unit.name;
       token.querySelector<HTMLElement>('.turn-health i')!.style.width = `${clamp(unit.hp / Math.max(1, unit.maxHp) * 100, 0, 100)}%`;
@@ -456,7 +458,7 @@ export class CombatUI {
   }
 
   private updateTarget(state: BattleState, unit: BattleUnit, view: UIView): void {
-    this.image('target-image', unit.asset);
+    this.figure('target-image', unit);
     this.text('target-name', unit.name);
     this.text('target-role', roleLine(state, unit));
     this.text('target-order', orderLine(state, unit));
@@ -504,9 +506,10 @@ export class CombatUI {
     if (node.textContent !== content) node.textContent = content;
   }
 
-  private image(name: string, asset: string): void {
+  /** Shows the unit's bust in a portrait. */
+  private figure(name: string, unit: BattleUnit): void {
     const node = this.node(name) as HTMLImageElement;
-    const src = assetUrl(asset);
+    const src = figureUrl(figureOf(unit));
     if (node.getAttribute('src') !== src) node.src = src;
   }
 
