@@ -178,7 +178,7 @@ export class CombatUI {
             <p>Se a vida ficar abaixo de 30%, recuem; senão, ataquem o líder.</p>
             <p>Arqueiros, avancem até os inimigos entrarem no alcance, depois disparem.</p>
             <p>Guerreiros, avancem; arqueiros, quando inimigos no alcance, disparem.</p>
-            <p>Condições: vida, fadiga, moral baixa, inimigos perto (2 hex), no alcance ou a até 3 hex. Combine com “e”, “ou” e “não”. Cada tropa avalia no início da própria vez. Sem alternativa, aguarda sem agir. Custo: maior ação de cada plano; grupos separados somam.</p>
+            <p>Condições: vida, fadiga, moral baixa, inimigos perto (2 hex), no alcance ou a até 3 hex. Combine com “e”, “ou” e “não”. Cada tropa avalia no início da própria vez. Sem alternativa, mantém a posição e só revida quem chegar perto. Custo: maior ação de cada plano; grupos separados somam.</p>
           </details>
         </form>
         <div class="division-status">

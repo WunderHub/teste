@@ -96,7 +96,7 @@ function directive(text: string): Directive {
   if (no?.vocative && yes.vocative && no.vocative !== yes.vocative) return bad('Use o mesmo grupo nas duas alternativas.');
   const called = yes.vocative ?? no?.vocative;
   if (called) { yes.vocative = called; if (no) no.vocative = called; }
-  const label = c ? `${once ? 'Quando' : 'Se'} ${conditionName(c)}: ${actionName(yes)}${no ? `; ${once ? 'até lá' : 'senão'}: ${actionName(no)}` : '; condição falsa: aguardar sem agir'}${once ? ' (transição única)' : ''}` : actionName(yes);
+  const label = c ? `${once ? 'Quando' : 'Se'} ${conditionName(c)}: ${actionName(yes)}${no ? `; ${once ? 'até lá' : 'senão'}: ${actionName(no)}` : '; condição falsa: manter posição e revidar'}${once ? ' (transição única)' : ''}` : actionName(yes);
   return { yes, no, condition: c, once, label };
 }
 export function parseShout(text: string): ParsedShout {
@@ -177,7 +177,9 @@ export function shoutOrder(s: BattleState, text: string, picked: OrderTarget): A
     for (const u of check.changing) {
       const chain = check.sudden.includes(u) ? (u.order?.chain ?? u.tactic?.chain ?? 0) + 1 : 0;
       if (chain) u.stress = { level: Math.min(STRESS.max, chain), round: s.activatedRound[u.id] === s.round ? s.round + 1 : s.round };
-      u.tactic = { ...structuredClone(d), signature, commanderId: leader.id, potency: leader.potency, waiting: true, givenRound: s.round, settledRound: s.round + 1 + ORDER_SETTLE_ROUNDS, chain };
+      // Until the troop checks its plan on its own turn, it only counts as waiting when it would have nothing to do now.
+      const waiting = !d.no && !evaluateCondition(d.condition, s, u, leader.id);
+      u.tactic = { ...structuredClone(d), signature, commanderId: leader.id, potency: leader.potency, waiting, givenRound: s.round, settledRound: s.round + 1 + ORDER_SETTLE_ROUNDS, chain };
       delete u.order;
     }
     for (const p of commandedPlatoons(s, leader)) for (const div of ['guerreiros', 'arqueiros'] as const) {
