@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { createBattle } from './encounters';
-import { PIECE_HEIGHT, layoutScenery, obstaclePiece, pieceByKey } from './decor';
+import { PIECE_SIZE, layoutScenery, obstaclePiece, pieceByKey } from './decor';
 import { GROUND_KEYS, PIECES } from './terrain-pieces';
 
 const board = { left: 0, top: 0, right: 2000, bottom: 1200 };
@@ -31,7 +31,7 @@ describe('painted terrain', () => {
       const inside = item.x > board.left && item.x < board.right && item.y > board.top && item.y < board.bottom;
       expect(inside, `${item.key} at ${Math.round(item.x)},${Math.round(item.y)}`).toBe(false);
       // A tree below the board stands far enough that its crown does not cover the last row.
-      if (kind === 'arvore' && item.y > board.bottom) expect(item.y - item.height).toBeGreaterThan(board.bottom - PIECE_HEIGHT.arvore * 0.4);
+      if (kind === 'arvore' && item.y > board.bottom) expect(item.y - item.height).toBeGreaterThan(board.bottom - PIECE_SIZE.arvore.height * 0.4);
     }
   });
 });

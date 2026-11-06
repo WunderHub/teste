@@ -9,10 +9,17 @@ import { PIECES, type Piece, type PieceKind } from './terrain-pieces';
 export interface Placed { key: string; x: number; y: number; height: number; flip: boolean; alpha?: number }
 export interface Rect { left: number; top: number; right: number; bottom: number }
 
-/** On-field height of each kind of piece, in world pixels (a bust is 108). */
-export const PIECE_HEIGHT: Record<PieceKind, number> = {
-  arvore: 230, 'arvore-seca': 190, arbusto: 70, capim: 34, toco: 48, rocha: 74, tronco: 46, ruina: 92,
+/**
+ * The box each kind of piece fits in on the field, in world pixels (a hex is 69 wide, a bust 108 tall).
+ * Pieces on obstacle tiles stay close to one hex wide, so they cover little of the neighbors.
+ */
+export const PIECE_SIZE: Record<PieceKind, { width: number; height: number }> = {
+  arvore: { width: 240, height: 250 }, 'arvore-seca': { width: 140, height: 160 }, arbusto: { width: 90, height: 75 },
+  capim: { width: 40, height: 36 }, toco: { width: 60, height: 50 }, rocha: { width: 92, height: 72 },
+  tronco: { width: 110, height: 60 }, ruina: { width: 112, height: 84 },
 };
+/** On-field height of a piece, fitted to its kind's box. */
+export const pieceHeight = (piece: Piece) => Math.min(PIECE_SIZE[piece.kind].height, PIECE_SIZE[piece.kind].width / piece.aspect);
 /** What stands on an obstacle tile, by the engine's obstacle type. */
 const OBSTACLE_KINDS: Record<NonNullable<Tile['obstacle']>, PieceKind[]> = {
   deadtree: ['arvore-seca'], rocks: ['rocha'], ruin: ['ruina'],
@@ -47,7 +54,7 @@ export function layoutScenery(board: Rect, area: Rect, seed: number): Placed[] {
   // A tree's crown rises above its foot, so trees below the board stand further off to keep the last rows visible.
   const treeClear = (x: number, y: number) => {
     const d = outside(x, y, board);
-    if (y > board.bottom) return y - board.bottom > PIECE_HEIGHT.arvore * 0.95 && d > 40;
+    if (y > board.bottom) return y - board.bottom > PIECE_SIZE.arvore.height * 0.95 && d > 40;
     return d > 70;
   };
   for (let i = 0; i < 2600 && trees.length; i++) {
@@ -57,20 +64,20 @@ export function layoutScenery(board: Rect, area: Rect, seed: number): Placed[] {
     if (random() > 0.35 + outside(x, y, board) / 260) continue;
     if (!fits(x, y, 92)) continue;
     const piece = pick(trees);
-    placed.push({ key: piece.key, x, y, height: PIECE_HEIGHT.arvore * (0.85 + random() * 0.3), flip: random() < 0.5 });
+    placed.push({ key: piece.key, x, y, height: pieceHeight(piece) * (0.85 + random() * 0.3), flip: random() < 0.5 });
   }
   for (let i = 0; i < 900 && low.length; i++) {
     const x = area.left + random() * (area.right - area.left), y = area.top + random() * (area.bottom - area.top);
     const d = outside(x, y, board);
     if (d < 30 || d > 260 || !fits(x, y, 70)) continue;
     const piece = pick(low);
-    placed.push({ key: piece.key, x, y, height: PIECE_HEIGHT[piece.kind] * (0.85 + random() * 0.3), flip: random() < 0.5 });
+    placed.push({ key: piece.key, x, y, height: pieceHeight(piece) * (0.85 + random() * 0.3), flip: random() < 0.5 });
   }
   // Tufts of tall grass on the open field: flat decoration, drawn under the fighters.
   for (let i = 0; i < 260 && grass.length; i++) {
     const x = board.left + random() * (board.right - board.left), y = board.top + random() * (board.bottom - board.top);
     const piece = pick(grass);
-    placed.push({ key: piece.key, x, y, height: PIECE_HEIGHT.capim * (0.7 + random() * 0.5), flip: random() < 0.5, alpha: 0.85 });
+    placed.push({ key: piece.key, x, y, height: pieceHeight(piece) * (0.7 + random() * 0.5), flip: random() < 0.5, alpha: 0.85 });
   }
   return placed;
 }

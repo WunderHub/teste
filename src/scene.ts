@@ -9,7 +9,7 @@ import { performAiAction } from './ai';
 import { shoutOrder } from './commands';
 import { FIGURE_ANCHOR, FIGURE_ASPECT, FIGURE_KEYS, figureOf, figureUrl } from './figures';
 import { paintGround, type GroundTextures } from './ground';
-import { PIECE_HEIGHT, layoutScenery, obstaclePiece, pieceByKey, type Placed } from './decor';
+import { layoutScenery, obstaclePiece, pieceByKey, pieceHeight, type Placed } from './decor';
 import { GROUND_KEYS, PIECES } from './terrain-pieces';
 import { CombatUI, ORDER_GROUPS, previewShout, type Composer, type UIView } from './ui';
 
@@ -195,7 +195,9 @@ export class CombatScene extends Phaser.Scene {
     // A worn trail crosses the field from the lower left to the upper right.
     const sx = width / 2200, sy = height / 1500, at = (x: number, y: number): [number, number] => [left + x * sx, top + y * sy];
     paintGround(texture.context, textures, {
-      width: texture.width, height: texture.height, resolution, originX: left, originY: top, tileSize: 320,
+      width: texture.width, height: texture.height, resolution, originX: left, originY: top,
+      // Sized so a grass tuft is about a fifth of a hex and the stones of rough ground about half of one.
+      tileSize: { grass: 520, dirt: 560, stones: 440 },
       rough: this.state.tiles.filter(t => t.terrain === 'rough').map(hexToWorld), hexRadius: R,
       trail: [at(90, 1190), at(440, 900), at(610, 1030), at(960, 780), at(1320, 530), at(1500, 740), at(2200, 450)],
       seed: SEED,
@@ -218,7 +220,7 @@ export class CombatScene extends Phaser.Scene {
       const piece = obstaclePiece(tile);
       if (!piece) continue;
       const p = hexToWorld(tile);
-      this.placePiece({ key: piece.key, x: p.x, y: p.y + 14, height: PIECE_HEIGHT[piece.kind], flip: ((tile.q * 7 + tile.r) & 1) === 1 });
+      this.placePiece({ key: piece.key, x: p.x, y: p.y + 14, height: pieceHeight(piece), flip: ((tile.q * 7 + tile.r) & 1) === 1 });
     }
   }
   /** A soft dark ellipse, laid under fighters and scenery so they sit on the ground. */
