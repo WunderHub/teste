@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import {
-  getActive, groupTurnOf, key, distance, neighbors, reachable, moveAp, previewAttack, move, attack, waitTurn, endTurn,
+  getActive, key, distance, neighbors, reachable, moveAp, previewAttack, move, attack, waitTurn, endTurn,
   isPlayerControlled, isSettled, tileAt, commandedPlatoons, commanderOf, platoonOf, platoonTroops, divisionOf, orderInfo, stressLevel, VOCATIVES,
   type BattleState, type Unit, type Hex, type ActionResult, type BattleEvent, type OrderTarget,
 } from './game';
@@ -529,36 +529,6 @@ export class CombatScene extends Phaser.Scene {
     if (generation !== this.generation) return;
     this.view.busy = false; this.refresh(); this.scheduleAi();
   }
-  /**
-   * A group turn: the AI plays the platoon's members one after another, and their marches play together, so a platoon
-   * moving takes about the time of one troop. It stops at the first blow, shout or flight, which then plays on its own.
-   */
-  private async executeGroup(platoonId: string) {
-    if (this.view.busy || this.state.outcome !== 'ongoing') return;
-    const generation = this.generation, marches = new Map<string, BattleEvent[]>(), rest: BattleEvent[] = [];
-    let message = '', played = 0;
-    for (let step = 0; step < 400 && !rest.length; step++) {
-      const active = getActive(this.state);
-      if (!active || this.state.outcome !== 'ongoing' || isPlayerControlled(active) || groupTurnOf(this.state, active)?.id !== platoonId) break;
-      const result = performAiAction(this.state);
-      if (!result.ok) {
-        if (!played) { this.view.message = result.message; this.ui.update(this.state, this.view); return; }
-        break;
-      }
-      played++;
-      this.lastActor = active.id; message = result.message ?? message;
-      for (const event of result.events) {
-        if (event.type === 'move' && !rest.length && event.unitId) marches.set(event.unitId, [...(marches.get(event.unitId) ?? []), event]);
-        else if (event.type !== 'turn' && event.type !== 'info') rest.push(event);
-      }
-    }
-    this.view.message = message; this.pointerTip.setVisible(false); this.view.composer = closedComposer();
-    this.view.busy = true; this.grid.clear(); this.pathGraphics.clear(); this.ui.update(this.state, this.view);
-    await Promise.all([...marches.values()].map(async steps => { for (const event of steps) { if (generation !== this.generation) return; await this.animateEvent(event); } }));
-    for (const event of rest) { if (generation !== this.generation) return; await this.animateEvent(event); }
-    if (generation !== this.generation) return;
-    this.view.busy = false; this.refresh(); this.scheduleAi();
-  }
   private async animateEvent(event: BattleEvent) {
     const pawn = event.unitId ? this.pawns.get(event.unitId) : undefined;
     if (event.type === 'order' && pawn && event.order) {
@@ -616,10 +586,6 @@ export class CombatScene extends Phaser.Scene {
     this.aiTimer?.remove(); const active = getActive(this.state);
     if (!active || this.state.outcome !== 'ongoing' || this.view.busy || this.view.paused || this.view.helpOpen || isPlayerControlled(active)) return;
     const delay = !this.onScreen(active.pos, 60) ? 30 : active.id === this.lastActor ? AI_DELAY * 0.3 : AI_DELAY;
-    const group = groupTurnOf(this.state, active);
-    this.aiTimer = this.time.delayedCall(delay, () => {
-      if (this.view.paused || this.view.helpOpen || this.view.busy) return;
-      void (group ? this.executeGroup(group.id) : this.execute(() => performAiAction(this.state)));
-    });
+    this.aiTimer = this.time.delayedCall(delay, () => { if (!this.view.paused && !this.view.helpOpen && !this.view.busy) void this.execute(() => performAiAction(this.state)); });
   }
 }
