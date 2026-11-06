@@ -8,6 +8,9 @@ import { createBattle } from './encounters';
 import { performAiAction } from './ai';
 import { shoutOrder } from './commands';
 import { FIGURE_ANCHOR, FIGURE_ASPECT, FIGURE_KEYS, figureOf, figureUrl } from './figures';
+import { paintGround, type GroundTextures } from './ground';
+import { layoutScenery, obstaclePiece, pieceByKey, pieceHeight, type Placed } from './decor';
+import { GROUND_KEYS, PIECES } from './terrain-pieces';
 import { CombatUI, ORDER_GROUPS, previewShout, type Composer, type UIView } from './ui';
 
 /** The HUD was laid out for a 1440×900 screen; that size still sets the default zoom. */
@@ -24,6 +27,9 @@ const AI_DELAY = 280;
 const DRAG_THRESHOLD = 6;
 const SPEEDS = [1, 2, 4] as const;
 const COLORS = { ally: 0x7caba1, enemy: 0xcb766a, gold: 0xc49a66, bone: 0xe5dec9, stress: 0xe58a5c };
+/** The move preview: the path in teal with a dotted trail, the destination in yellow. */
+const PATH = { fill: 0x2fae9c, edge: 0x63e0cc, dot: 0xf2dd8a, goal: 0xe9cf5c };
+const terrainUrl = (name: string) => `${import.meta.env.BASE_URL}assets/terreno/${name}`;
 const closedComposer = (): Composer => ({ step: 'closed', text: '' });
 const TEXT_FONT = '"Barlow Condensed", "Arial Narrow", Arial, sans-serif';
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
@@ -61,10 +67,12 @@ export class CombatScene extends Phaser.Scene {
   private world = { width: W, height: H };
   private pawns = new Map<string, Pawn>();
   private grid!: Phaser.GameObjects.Graphics;
+  /** The thin lines of every hex, drawn once; G shows or hides them. */
+  private gridLines!: Phaser.GameObjects.Graphics;
   private pathGraphics!: Phaser.GameObjects.Graphics;
   private hoverHex?: Hex;
   private pathMap = new Map<string, Hex[]>();
-  private showGrid = false;
+  private showGrid = true;
   private aiTimer?: Phaser.Time.TimerEvent;
   private pointerTip!: Phaser.GameObjects.Text;
   private activeMarker!: Phaser.GameObjects.Triangle;
@@ -78,20 +86,19 @@ export class CombatScene extends Phaser.Scene {
 
   constructor() { super('Combat'); }
   preload() {
-    for (const name of ['rocks', 'ruin', 'deadtree', 'death'])
-      this.load.svg(name, `${import.meta.env.BASE_URL}assets/${name}.svg`, { scale: 2 });
+    this.load.svg('death', `${import.meta.env.BASE_URL}assets/death.svg`, { scale: 2 });
     for (const key of FIGURE_KEYS) this.load.image(key, figureUrl(key));
+    for (const key of GROUND_KEYS) this.load.image(key, terrainUrl(`${key}.jpg`));
+    for (const piece of PIECES) this.load.image(piece.key, terrainUrl(`${piece.key}.png`));
   }
   create() {
     this.state = createBattle(SEED, 'campo-aberto');
     this.world = worldSize(this.state);
     this.createTerrain();
+    this.gridLines = this.add.graphics().setDepth(0);
+    this.drawGridLines(); this.gridLines.setVisible(this.showGrid);
     this.grid = this.add.graphics().setDepth(1);
     this.pathGraphics = this.add.graphics().setDepth(2);
-    for (const tile of this.state.tiles) {
-      const p = hexToWorld(tile);
-      if (tile.obstacle) this.add.image(p.x, p.y + 12, tile.obstacle).setDisplaySize(100, 100).setOrigin(0.5, 0.9).setDepth(100 + p.y);
-    }
     this.activeMarker = this.add.triangle(0, 0, 0, 0, 12, 0, 6, 7, COLORS.gold).setDepth(1300);
     this.pointerTip = this.add.text(0, 0, '', { fontFamily: 'Arial, sans-serif', fontSize: '14px', color: '#e5dec9', backgroundColor: '#18211e', padding: { x: 12, y: 8 }, lineSpacing: 4 }).setDepth(1500).setVisible(false);
     this.ui = new CombatUI(document.getElementById('hud')!, {
@@ -176,58 +183,86 @@ export class CombatScene extends Phaser.Scene {
     return this.state.units.find(isPlayerControlled);
   }
 
+  /** The painted ground, the forest around the clearing and the pieces standing on obstacle tiles. */
   private createTerrain() {
+    const left = -TERRAIN_X, top = -TERRAIN_Y;
     const width = Math.ceil(this.world.width + 2 * TERRAIN_X), height = Math.ceil(this.world.height + 2 * TERRAIN_Y);
-    const area = width * height / (2200 * 1500), sx = width / 2200, sy = height / 1500;
-    const texture = this.textures.createCanvas('terrain', width, height)!;
-    const ctx = texture.context;
-    let seed = 23761;
-    const random = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-    ctx.fillStyle = '#414737'; ctx.fillRect(0, 0, width, height);
-    const colors = ['#494d3c', '#3b4435', '#50513e', '#535541', '#394233'];
-    for (let i = 0; i < 130 * area; i++) {
-      ctx.fillStyle = colors[i % colors.length]; ctx.globalAlpha = 0.4 + random() * 0.3;
-      ctx.beginPath(); ctx.ellipse(random() * width, random() * height, 45 + random() * 180, 15 + random() * 65, random(), 0, Math.PI * 2); ctx.fill();
-    }
-    ctx.globalAlpha = 1; ctx.strokeStyle = '#555640'; ctx.lineWidth = 92; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(90 * sx, 1190 * sy);
-    ctx.bezierCurveTo(440 * sx, 900 * sy, 610 * sx, 1030 * sy, 960 * sx, 780 * sy);
-    ctx.bezierCurveTo(1320 * sx, 530 * sy, 1500 * sx, 740 * sy, 2200 * sx, 450 * sy); ctx.stroke();
-    ctx.strokeStyle = '#5f6048'; ctx.lineWidth = 31; ctx.globalAlpha = 0.3; ctx.stroke(); ctx.globalAlpha = 1;
-    for (let i = 0; i < 22000 * area; i++) {
-      const x = random() * width, y = random() * height;
-      ctx.fillStyle = i % 3 === 0 ? '#1a2119' : '#a2a185'; ctx.globalAlpha = 0.035 + random() * 0.08;
-      ctx.fillRect(x, y, 1 + random() * 2, 1);
-    }
-    for (let i = 0; i < 1500 * area; i++) {
-      const x = random() * width, y = random() * height, h = 3 + random() * 9;
-      ctx.globalAlpha = 0.18 + random() * 0.28; ctx.strokeStyle = i % 2 ? '#a0a27a' : '#242c22'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(x - 3, y - h * 0.7); ctx.lineTo(x, y); ctx.lineTo(x + 2, y - h); ctx.moveTo(x, y); ctx.lineTo(x + 5, y - h * 0.5); ctx.stroke();
-    }
-    for (let i = 0; i < 650 * area; i++) {
-      ctx.globalAlpha = 0.17 + random() * 0.2; ctx.fillStyle = '#bab59a';
-      ctx.beginPath(); ctx.ellipse(random() * width, random() * height, 1 + random() * 3, 1 + random(), random(), 0, Math.PI * 2); ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-    const radius = Math.max(width, height) / 2;
-    const shade = ctx.createRadialGradient(width / 2, height / 2, radius * 0.23, width / 2, height / 2, radius);
-    shade.addColorStop(0, 'rgba(10,20,15,0)'); shade.addColorStop(1, 'rgba(10,20,15,.5)');
-    ctx.fillStyle = shade; ctx.fillRect(0, 0, width, height);
-    texture.refresh(); this.add.image(-TERRAIN_X, -TERRAIN_Y, 'terrain').setOrigin(0).setDepth(-10);
-    const { width: ww, height: wh } = this.world;
-    for (const [x, y, asset, size] of [[40, wh * 0.33, 'deadtree', 150], [ww - 60, wh * 0.24, 'rocks', 110], [ww - 50, wh * 0.76, 'deadtree', 160], [70, wh * 0.88, 'rocks', 125]] as const)
-      this.add.image(x, y, asset).setDisplaySize(size, size).setAlpha(0.9).setDepth(y - 50);
-    for (const tile of this.state.tiles.filter(t => t.terrain === 'rough' && !t.obstacle)) {
-      const p = hexToWorld(tile), g = this.add.graphics().setDepth(-1);
-      g.fillStyle(0xaba68b, 0.14).fillEllipse(p.x, p.y, 66, 35); g.lineStyle(1, 0xc0b99b, 0.28);
-      for (let i = 0; i < 7; i++) { const x = p.x - 25 + random() * 50, y = p.y - 12 + random() * 24; g.lineBetween(x, y, x + 3 + random() * 4, y - 1); }
+    // Painted a little sharper than the world, within a texture size every desktop GPU takes.
+    const resolution = Math.min(1.4, 4096 / width, 4096 / height);
+    const texture = this.textures.createCanvas('terrain', Math.round(width * resolution), Math.round(height * resolution))!;
+    const source = (key: string) => this.textures.get(key).getSourceImage() as HTMLImageElement;
+    const textures: GroundTextures = { grass: source('chao-grama'), dirt: source('chao-terra'), stones: source('chao-pedras') };
+    // A worn trail crosses the field from the lower left to the upper right.
+    const sx = width / 2200, sy = height / 1500, at = (x: number, y: number): [number, number] => [left + x * sx, top + y * sy];
+    paintGround(texture.context, textures, {
+      width: texture.width, height: texture.height, resolution, originX: left, originY: top,
+      // Sized so a grass tuft is about a fifth of a hex and the stones of rough ground about half of one.
+      tileSize: { grass: 520, dirt: 560, stones: 440 },
+      rough: this.state.tiles.filter(t => t.terrain === 'rough').map(hexToWorld), hexRadius: R,
+      trail: [at(90, 1190), at(440, 900), at(610, 1030), at(960, 780), at(1320, 530), at(1500, 740), at(2200, 450)],
+      seed: SEED,
+    });
+    // Darker toward the edges, where the forest closes in.
+    const ctx = texture.context, cx = texture.width / 2, cy = texture.height / 2, radius = Math.max(cx, cy);
+    const shade = ctx.createRadialGradient(cx, cy, radius * 0.4, cx, cy, radius * 1.1);
+    shade.addColorStop(0, 'rgba(14,20,10,0)'); shade.addColorStop(1, 'rgba(14,20,10,.6)');
+    ctx.fillStyle = shade; ctx.fillRect(0, 0, texture.width, texture.height);
+    texture.refresh(); this.add.image(left, top, 'terrain').setOrigin(0).setScale(1 / resolution).setDepth(-10);
+
+    this.createShadowTexture();
+    const board = {
+      left: hexToWorld({ q: 0, r: 0 }).x - DX / 2, right: hexToWorld({ q: this.state.width - 1, r: 1 }).x + DX / 2,
+      top: MARGIN_Y - R, bottom: MARGIN_Y + (this.state.height - 1) * DY + R,
+    };
+    const area = { left, top, right: this.world.width + TERRAIN_X, bottom: this.world.height + TERRAIN_Y };
+    for (const item of layoutScenery(board, area, SEED)) this.placePiece(item);
+    for (const tile of this.state.tiles) {
+      const piece = obstaclePiece(tile);
+      if (!piece) continue;
+      const p = hexToWorld(tile);
+      this.placePiece({ key: piece.key, x: p.x, y: p.y + 14, height: pieceHeight(piece), flip: ((tile.q * 7 + tile.r) & 1) === 1 });
     }
   }
-  private hex(graphics: Phaser.GameObjects.Graphics, hex: Hex, color: number, alpha: number, stroke = 0.3, width = 1) {
+  /** A soft dark ellipse, laid under fighters and scenery so they sit on the ground. */
+  private createShadowTexture() {
+    if (this.textures.exists('sombra')) return;
+    const texture = this.textures.createCanvas('sombra', 128, 64)!, ctx = texture.context;
+    ctx.setTransform(1, 0, 0, 0.5, 0, 0);
+    const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    gradient.addColorStop(0, 'rgba(10,14,8,0.85)'); gradient.addColorStop(0.5, 'rgba(10,14,8,0.5)'); gradient.addColorStop(1, 'rgba(10,14,8,0)');
+    ctx.fillStyle = gradient; ctx.fillRect(0, 0, 128, 128);
+    texture.refresh();
+  }
+  private placePiece(item: Placed) {
+    const piece = pieceByKey(item.key);
+    if (!piece) return;
+    const width = item.height * piece.aspect, flat = piece.kind === 'capim';
+    if (!flat) {
+      // The light comes from the upper left, so shadows fall a little to the right.
+      const spread = piece.kind === 'arvore' || piece.kind === 'arvore-seca' ? 0.75 : 1.05;
+      this.add.image(item.x + width * 0.08, item.y - 2, 'sombra').setDisplaySize(width * spread, Math.min(width * spread * 0.32, 46)).setAlpha(0.55).setDepth(-5);
+    }
+    this.add.image(item.x, item.y, piece.key).setOrigin(item.flip ? 1 - piece.anchorX : piece.anchorX, piece.anchorY)
+      .setDisplaySize(width, item.height).setFlipX(item.flip).setAlpha(item.alpha ?? 1).setDepth(flat ? -4 : 100 + item.y);
+  }
+  /** Every hex edge once, so shared edges are not drawn twice as bright. */
+  private drawGridLines() {
+    const seen = new Set<string>();
+    this.gridLines.clear().lineStyle(1, COLORS.bone, 0.17);
+    for (const tile of this.state.tiles) {
+      const p = hexToWorld(tile), corners = [0, 1, 2, 3, 4, 5].map(i => { const a = (i * 60 - 30) * Math.PI / 180; return { x: p.x + R * Math.cos(a), y: p.y + R * Math.sin(a) }; });
+      corners.forEach((a, i) => {
+        const b = corners[(i + 1) % 6], id = [a, b].map(c => `${Math.round(c.x)},${Math.round(c.y)}`).sort().join('|');
+        if (seen.has(id)) return;
+        seen.add(id); this.gridLines.lineBetween(a.x, a.y, b.x, b.y);
+      });
+    }
+  }
+  private hex(graphics: Phaser.GameObjects.Graphics, hex: Hex, color: number, alpha: number, stroke = 0.3, width = 1, edge = color) {
     const p = hexToWorld(hex), points: Phaser.Geom.Point[] = [];
     for (let i = 0; i < 6; i++) { const a = (i * 60 - 30) * Math.PI / 180; points.push(new Phaser.Geom.Point(p.x + (R - 2) * Math.cos(a), p.y + (R - 2) * Math.sin(a))); }
-    graphics.fillStyle(color, alpha).fillPoints(points, true);
-    graphics.lineStyle(width, color, stroke).strokePoints(points, true);
+    if (alpha > 0) graphics.fillStyle(color, alpha).fillPoints(points, true);
+    if (stroke > 0) graphics.lineStyle(width, edge, stroke).strokePoints(points, true);
   }
   /** A pennant over the head marks leaders, so the player can find the units they command. */
   private drawPennant(graphics: Phaser.GameObjects.Graphics, x: number, y: number, team: Unit['team']) {
@@ -297,9 +332,8 @@ export class CombatScene extends Phaser.Scene {
   }
   private drawGrid() {
     this.grid.clear(); this.pathGraphics.clear(); const active = getActive(this.state);
-    if (this.showGrid) for (const tile of this.state.tiles) this.hex(this.grid, tile, tile.obstacle ? 0xc0b29a : 0xb9c4ac, 0, 0.14);
     if (!active || this.state.outcome !== 'ongoing' || this.view.paused || this.view.helpOpen) return;
-    if (this.playerCanAct() && this.view.mode === 'move') for (const tile of this.state.tiles) if (this.pathMap.has(key(tile))) this.hex(this.grid, tile, COLORS.ally, 0.055, 0.24);
+    if (this.playerCanAct() && this.view.mode === 'move') for (const tile of this.state.tiles) if (this.pathMap.has(key(tile))) this.hex(this.grid, tile, COLORS.bone, 0.09, 0);
     this.hex(this.grid, active.pos, COLORS.gold, 0.08, 0.75, 2);
     if (isPlayerControlled(active) && commandedPlatoons(this.state, active).length) this.drawCommand(active);
     if (this.playerCanAct() && this.view.mode === 'attack') for (const enemy of this.state.units.filter(u => u.team !== active.team && !u.dead && !u.escaped)) {
@@ -307,9 +341,17 @@ export class CombatScene extends Phaser.Scene {
     }
     const path = this.hoverHex && this.pathMap.get(key(this.hoverHex));
     if (path && this.view.mode === 'move' && !this.view.hoveredId) {
-      this.pathGraphics.lineStyle(2, COLORS.gold, 0.8); let previous = hexToWorld(active.pos);
-      for (const step of path) { const p = hexToWorld(step); this.pathGraphics.lineBetween(previous.x, previous.y, p.x, p.y); this.pathGraphics.fillStyle(COLORS.gold, 1).fillCircle(p.x, p.y, 3); previous = p; }
-      this.hex(this.pathGraphics, this.hoverHex!, COLORS.gold, 0.12, 0.9, 2);
+      // Teal hexes along the way, a dotted trail between their centers and the destination in yellow.
+      const g = this.pathGraphics;
+      for (const step of path.slice(0, -1)) this.hex(g, step, PATH.fill, 0.34, 0.85, 1.5, PATH.edge);
+      this.hex(g, this.hoverHex!, PATH.goal, 0.26, 1, 2.5);
+      let previous = hexToWorld(active.pos);
+      for (const step of path) {
+        const p = hexToWorld(step), length = Math.hypot(p.x - previous.x, p.y - previous.y), dots = Math.max(1, Math.round(length / 11));
+        for (let i = 1; i < dots; i++) g.fillStyle(PATH.dot, 0.95).fillCircle(previous.x + (p.x - previous.x) * i / dots, previous.y + (p.y - previous.y) * i / dots, 2);
+        g.fillStyle(PATH.dot, 1).fillCircle(p.x, p.y, step === path[path.length - 1] ? 6 : 4.5);
+        previous = p;
+      }
     }
   }
   /** The command range outline and, while an order is under the cursor, who would hear it and who is too far. */
@@ -473,7 +515,7 @@ export class CombatScene extends Phaser.Scene {
       else this.togglePause();
       return;
     }
-    if (event.code === 'KeyG') { this.showGrid = !this.showGrid; this.drawGrid(); return; }
+    if (event.code === 'KeyG') { this.showGrid = !this.showGrid; this.gridLines.setVisible(this.showGrid); return; }
     const pan: Record<string, [number, number]> = { ArrowLeft: [-160, 0], ArrowRight: [160, 0], ArrowUp: [0, -160], ArrowDown: [0, 160] };
     if (pan[event.code]) { event.preventDefault(); this.panBy(...pan[event.code]); return; }
     if (event.code === 'Equal' || event.code === 'NumpadAdd') { this.zoomAt(this.scale.width / 2, this.scale.height / 2, 1.12); return; }

@@ -102,6 +102,15 @@ Ainda não estão definidos custos adicionais de subida/descida, queda, alcance 
 
 Não exigir mapas espelhados como regra futura. Critérios exatos de equilíbrio e conectividade devem ser definidos para cada tipo de encontro. Enquanto o mapa global não existir, um perfil de ambiente selecionado manualmente pode servir como entrada de teste, sem simular uma integração inexistente.
 
+## Kit de terreno v1 (no jogo desde 06/11/2026)
+
+O chefe aprovou a direção de cenário da prancha [kit de floresta em encosta](referencias/kit-floresta-encosta.png) e da [comparação no campo](referencias/comparacao-no-campo.png), **só para o cenário**: os bonecos dessas imagens não contam, e os bustos seguem com a base no chão. As peças foram geradas no Magnific com autorização dele (Nano Banana 2.1, a prancha como referência de estilo) e estão em `arte/terreno-v1/`:
+
+- Três texturas de chão vistas de cima: gramado, terra batida (manchas e trilha) e pedregoso (terreno difícil).
+- Árvores verdes e amarela (floresta em volta da clareira), árvore seca, arbustos, capim, toco, rochas, troncos e três pedaços de muro em ruína.
+
+No campo, cada obstáculo do motor ganha a peça correspondente (`deadtree` → árvore seca, `rocks` → rochas, `ruin` → muro), do tamanho de cerca de um hexágono. Árvores, arbustos e rochas soltas ficam fora do tabuleiro, para nada parecer cobertura onde as regras não têm cobertura; dentro dele só há capim rasteiro. O campo segue plano: patamares, bordas de rocha e alturas continuam sendo o plano descrito acima.
+
 ## Referências visuais e suas limitações
 
 As imagens são estudos conceituais, **não sprites prontos, tiles com encaixes garantidos ou capturas do jogo**. Não colocá-las diretamente como mapas funcionais. Transparência, perspectiva, escala, recorte e encaixes precisam ser produzidos e verificados na etapa de assets.
@@ -111,7 +120,7 @@ As imagens são estudos conceituais, **não sprites prontos, tiles com encaixes 
 - [Comparação no campo](referencias/comparacao-no-campo.png): o usuário escolheu **sem base** e gostou do estilo do terreno. Há bases residuais, posicionamentos imprecisos, variações de cabelo/pele e exemplos de oclusão que não constituem aprovação desses detalhes. Aplicar as regras textuais acima.
 - [Kit de floresta em encosta](referencias/kit-floresta-encosta.png): estilo aprovado para solos, árvores, rochas e troncos. **As rampas da prancha foram explicitamente rejeitadas**. Não reproduzi-las. Ruínas ainda precisam de um kit original próprio.
 
-Figma saiu do fluxo. Não usar Magnific nesta etapa sem nova instrução. O repositório concentra a especificação e as referências para colaboração entre assistentes.
+Figma saiu do fluxo. Não usar Magnific sem nova instrução do chefe; o kit de terreno v1 foi gerado com a autorização dele. O repositório concentra a especificação e as referências para colaboração entre assistentes.
 
 ## Próxima etapa e validação
 

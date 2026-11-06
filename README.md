@@ -1,6 +1,6 @@
 # Vale do Sal
 
-Protótipo original de combate tático em hexágonos, feito com **Phaser 3 + TypeScript + Vite**. No Campo das Salinas, Duarte e seu pelotão de 20 tropas enfrentam o bando do Senhor da Guerra, também com 20. Você comanda só o líder; as tropas cumprem as ordens dele, pela IA. O Líder Supremo, personagem do jogador, fica fora da batalha: se ele cair em campo, a campanha acaba. As tropas aparecem como bustos pintados (cabeça e tronco, arma e escudo na frente), com a cor do lado no tecido e no escudo; obstáculos e ícones ainda são vetoriais provisórios. A interface fica sobreposta ao próprio campo.
+Protótipo original de combate tático em hexágonos, feito com **Phaser 3 + TypeScript + Vite**. No Campo das Salinas, Duarte e seu pelotão de 20 tropas enfrentam o bando do Senhor da Guerra, também com 20. Você comanda só o líder; as tropas cumprem as ordens dele, pela IA. O Líder Supremo, personagem do jogador, fica fora da batalha: se ele cair em campo, a campanha acaba. As tropas aparecem como bustos pintados (cabeça e tronco, arma e escudo na frente), com a cor do lado no tecido e no escudo. O campo é pintado: chão de grama com manchas de terra e uma trilha, chão pedregoso no terreno difícil, uma floresta em volta da clareira, e rochas, árvores secas e muros em ruína nos obstáculos. Os ícones da interface ainda são vetoriais provisórios. A interface fica sobreposta ao próprio campo.
 
 O design completo do combate (líderes, pelotões, ordens e turnos) está em [`docs/design-combate.md`](docs/design-combate.md). Esta versão implementa as fases 1 e 2 dele. A vez de grupo da fase 3 foi testada e retirada: cada combatente age pela própria iniciativa.
 
@@ -108,8 +108,10 @@ Ainda não há altura de terreno, cobertura parcial, dispersão de projéteis al
 - `src/game.test.ts`: testes de regras e simulações completas.
 - `src/scene.ts`: campo em Phaser, seleção de hexágonos, prévias, animações e execução da IA.
 - `src/ui.ts` e `src/style.css`: interface em português, atributos, fila, controles, ajuda e resultados.
-- `public/assets/`: obstáculos e ícones SVG provisórios; `public/assets/bustos/` tem os bustos das tropas, gerados por `scripts/compor_bustos.py` (Pillow) a partir das camadas em `arte/bustos-v1/`. Para trocar as cores dos lados, edite `CORES` no script e rode `python3 scripts/compor_bustos.py`.
+- `public/assets/`: ícones SVG provisórios; `public/assets/bustos/` tem os bustos das tropas, gerados por `scripts/compor_bustos.py` (Pillow) a partir das camadas em `arte/bustos-v1/`. Para trocar as cores dos lados, edite `CORES` no script e rode `python3 scripts/compor_bustos.py`.
 - `src/figures.ts`: qual busto cada unidade usa.
+- `public/assets/terreno/`: o kit de terreno pintado (texturas de chão e peças recortadas), gerado por `scripts/compor_terreno.py` (Pillow e numpy) a partir das imagens em `arte/terreno-v1/`; o script também escreve `src/terrain-pieces.ts`. Rode `python3 scripts/compor_terreno.py` depois de trocar uma imagem.
+- `src/ground.ts`: pinta o chão do campo misturando as texturas com ruído; `src/decor.ts`: onde ficam a floresta, as peças soltas e a peça de cada obstáculo, sempre iguais para a mesma semente.
 - `public/fonts/`: fontes locais e respectivas licenças.
 - `docs/design-combate.md`: design do combate com líderes, pelotões e ordens. As fases 1 e 2 estão implementadas; as outras ainda não.
 
