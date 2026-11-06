@@ -5,6 +5,6 @@ export default defineConfig({
   server: { port: 5173, strictPort: true },
   build: {
     chunkSizeWarningLimit: 1600,
-    rollupOptions: { output: { manualChunks: { phaser: ['phaser'] } } },
+    rollupOptions: { input: { combate: 'index.html', estudo: 'estudo-visual.html' }, output: { manualChunks: { phaser: ['phaser'] } } },
   },
 });

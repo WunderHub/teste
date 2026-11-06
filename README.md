@@ -8,6 +8,10 @@ O design completo do combate (líderes, pelotões, ordens e turnos) está em [`d
 
 As decisões aprovadas sobre corpo inteiro **sem base**, aparência modular, expressões, oclusão e geração de terreno baseada no mapa global estão em [docs/direcao-visual-terreno.md](docs/direcao-visual-terreno.md), com referências visuais. Essa especificação descreve a próxima etapa; não altera as funcionalidades atuais descritas abaixo.
 
+## Estudo visual isolado
+
+A cena de comparação em `/estudo-visual.html` demonstra ajustes de composição, escala e iluminação com os assets existentes. Não altera o combate. Veja [capturas, controles e limites do estudo](docs/estudo-visual.md).
+
 ## Executar no navegador
 
 Requer Node.js 22 ou superior.
