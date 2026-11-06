@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#181c16"><title>Vale do Sal · Estudo de atmosfera</title><link rel="icon" type="image/svg+xml" href="./assets/shield.svg"></head>
+<body>
+  <main id="study" aria-label="Estudo interativo do cenário"></main>
+  <header class="masthead"><a href="./index.html" aria-label="Abrir o protótipo de combate">◇</a><div><p>VALE DO SAL</p><h1>A clareira das vigílias</h1><span>Estudo visual · composição e luz</span></div></header>
+  <nav class="compare" aria-label="Comparar o tratamento da cena"><button data-mode="base" aria-pressed="false">Base de comparação</button><button data-mode="study" aria-pressed="true">Estudo de atmosfera</button></nav>
+  <aside class="legend"><span class="line"></span><p id="description">Terra exposta, vegetação agrupada e luz de fim de tarde.</p></aside>
+  <section class="toolbar" aria-label="Controles do estudo">
+    <div class="selection"><img src="./assets/bustos/guerreiro-ally.png" alt=""><div><small>PEÇA SELECIONADA</small><strong id="selected-name">Duarte</strong><span>Clique em um hexágono para mover</span></div></div>
+    <div class="controls"><button id="grid" aria-pressed="false">Grade <kbd>G</kbd></button><button id="minus" aria-label="Afastar">−</button><span id="zoom">100%</span><button id="plus" aria-label="Aproximar">+</button><button id="reset">Repor cena</button></div>
+  </section>
+  <p class="footnote">Mesmos assets e enquadramento nas duas versões · demonstração visual, sem regras de combate.</p>
+  <div id="status" class="sr-only" aria-live="polite">Carregando cenário.</div>
+  <noscript>Ative JavaScript para abrir o estudo.</noscript>
+  <script type="module" src="/src/study/main.ts"></script>
+</body></html>
