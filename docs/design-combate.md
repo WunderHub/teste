@@ -21,7 +21,7 @@ Todo número marcado como proposta serve só para começar a testar. O balanceam
 - Em combate, o player controla **só os líderes**. As **tropas** agem por IA e seguem as **ordens** do líder do seu **pelotão**.
 - A conta ideal é **1 líder para cada 20 tropas**. Tropa demais deixa o líder **Sobrecarregado**. Líder sobrando coloca as tropas sob **Pressão de liderança**.
 - O líder **grita as ordens**: o player escolhe o grupo e escreve a ordem numa caixa de texto, e o jogo lê o que ele escreveu. As ordens custam **PL** (pontos de liderança), só chegam a quem está no **alcance** e valem até serem trocadas. Elas só dão bônus depois de **assentar** por um turno inteiro; trocar antes disso causa **estresse** nas tropas.
-- Fora de combate, o pelotão age **todo de uma vez**. Quando alguém do grupo ataca ou é atacado, o grupo passa a agir **um por um, por iniciativa**.
+- Cada combatente age **pela própria iniciativa**, desde a primeira rodada, intercalando aliados e inimigos. A vez de grupo (o pelotão agindo todo de uma vez até o contato) foi testada na versão 0.7 e descartada pelo chefe.
 - Até **100 tropas por lado**. O inimigo segue as mesmas regras, com líderes dele.
 - A meta da IA é ser **melhor que a de *Battle Brothers***, medida por testes automáticos (veja a [seção 10](#10-ia)).
 - A base tática segue o gênero de *Battle Brothers* (hexágonos, pontos de ação, fadiga, atributos, traços, moral, zona de controle), com regras, nomes e números próprios. É inspiração, não cópia.
@@ -281,36 +281,24 @@ flowchart TD
   F --> G[Batalha segue no automático, só com IA]
 ```
 
-## 8. Turnos: grupos e iniciativa
-
-Implementado na fase 3 (versão 0.7), conforme a proposta abaixo. O pelotão só age em grupo enquanto tem o líder em campo e firme; sem líder (inclusive com comandante interino), cada um age pela própria iniciativa. Quem foge sempre age sozinho, no fim da fila.
+## 8. Turnos: iniciativa
 
 **Decidido**
 
-- O líder e o seu grupo agem todos de uma vez.
-- Quando qualquer tropa ou líder do grupo entra em combate (atacando ou sendo atacado, corpo a corpo ou à distância), cada membro daquele grupo rola sua iniciativa e passa a agir individualmente.
+- Cada combatente, líder ou tropa, age pela própria iniciativa (iniciativa menos fadiga) desde a primeira rodada, intercalando aliados e inimigos. Empates são decididos por sorteio fixo da semente.
+- Não há vez de grupo. Ela foi implementada na versão 0.7 (o pelotão agia em bloco na vez do líder até o primeiro golpe) e o chefe preferiu as iniciativas (2026-11-06), então a versão 0.8 voltou à fila individual.
 
 **Proposta**
 
-- A fila da rodada mistura dois tipos de vez:
-  - **Vez de grupo**, para pelotões fora de combate. A posição na fila vem da Iniciativa do líder. O líder age primeiro (ordem, movimento, ataque) e depois as tropas executam a ordem, uma depois da outra, sem parar para o player.
-  - **Vez individual**, para membros de grupos em combate. Cada um entra na fila pela própria iniciativa, intercalando aliados e inimigos, como o protótipo já faz.
-- **Contato no meio da rodada**: no instante em que alguém do grupo ataca ou é atacado, a vez de grupo se divide em vezes individuais para quem ainda não agiu naquela rodada. Elas entram na fila pela iniciativa. Quem já agiu não age de novo. Isso vale para os dois lados: quem atacou e quem foi atacado.
-- **Saída do combate**: se o grupo passa uma rodada inteira sem atacar, sem ser atacado e sem ninguém colado a um inimigo, ele volta a agir em grupo na rodada seguinte.
-- **Ordem no modo individual**: o líder dá a ordem na vez dele, e ela vale na hora para quem do pelotão ainda vai agir naquela rodada.
+- **Ordem**: o líder dá a ordem na vez dele, e ela vale na hora para quem do pelotão ainda vai agir naquela rodada.
 - **Contagem**: o assentamento das ordens e o estresse contam por rodada (seção 6).
+- Quem foge age no fim da fila.
 
 ```mermaid
 flowchart TD
-  A[Início da rodada] --> B[Monta a fila por iniciativa: vezes de grupo e vezes individuais]
+  A[Início da rodada] --> B[Monta a fila pela iniciativa de cada combatente]
   B --> C{Próxima vez}
-  C -->|Vez de grupo| D[Líder age: ordem, movimento, ataque]
-  D --> E[Tropas cumprem a ordem, uma a uma]
-  E --> F{Alguém atacou ou foi atacado?}
-  F -->|Não| C
-  F -->|Sim| G[Os grupos envolvidos entram em combate e quem não agiu vira vez individual]
-  G --> C
-  C -->|Vez individual| H[Combatente age pela própria iniciativa]
+  C -->|Combatente| H[Age pela própria iniciativa: líder dá ordem, anda, ataca]
   H --> C
   C -->|Fila vazia| I[Fim da rodada: assenta ordens, tira estresse vencido e atualiza status]
   I --> A
@@ -331,7 +319,7 @@ flowchart TD
   - Mapa de distância por pelotão, calculado uma vez por rodada e consultado por todas as tropas dele.
   - Mapa de ameaça por rodada: quais hexágonos estão na zona de controle ou no alcance de arqueiros inimigos.
   - IA rodando num Web Worker, para a tela não travar. O motor já é puro (sem Phaser e sem DOM), então a mudança é direta.
-- Animação: a vez de grupo anima as tropas em paralelo. A tela ganha velocidade 1×, 2× e 4× e a opção de pular animações da IA.
+- Animação: a tela ganha velocidade 1×, 2× e 4× e a opção de pular animações da IA.
 - Meta de desempenho: uma rodada inteira da IA, com 200 combatentes, em menos de 1 segundo num notebook comum.
 
 ## 10. IA
@@ -365,7 +353,6 @@ Antes das tropas agirem, o pelotão monta um plano rápido:
 
 - **Formação**: calcula as vagas (linha virada para o inimigo, arqueiros atrás) e distribui entre as tropas.
 - **Divisão de alvos**: evita seis tropas batendo num inimigo que cai com dois golpes e espalha os tiros quando compensa.
-- **Ordem de ação dentro da vez de grupo**: quem vai para a frente age primeiro, para não bloquear o caminho de quem vem atrás.
 
 ### 10.3 Líder IA (inimigo, comandante interino e modo automático)
 
@@ -392,7 +379,7 @@ Não dá para colocar as duas IAs para jogar uma contra a outra, então "melhor"
 | 6 | Cumprir a ordem do jeito certo | Linha defensiva não persegue, avanço devagar não abre buraco, arqueiros procuram linha de tiro. | 2 |
 | 7 | Ficar no alcance do líder | A tropa evita sair do alcance de comando, para não ficar sem notícias. | 2 |
 | 8 | Dar a ordem certa na hora certa | Líder IA lê força, distância e arqueiros de cada lado, e combina ordens para guerreiros e arqueiros. | 2 (v1), 5 (v2) |
-| 9 | Coordenar o pelotão | Divide alvos e decide quem age primeiro na vez de grupo. | 3 |
+| 9 | Coordenar o pelotão | Divide alvos entre as tropas do pelotão. | 5 |
 | 10 | Pensar no lado inteiro | Escolhe flancos, protege os próprios líderes e caça os do player. | 5 |
 
 A IA nunca trapaceia (seção 10, início). A régua de aprovação:
@@ -424,7 +411,7 @@ A IA nunca trapaceia (seção 10, início). A régua de aprovação:
 1. ✅ Modelo de dados (líder, tropa, pelotão, nota de atributo), mapa maior com câmera e um encontro de teste de 20 contra 20, com 1 líder por lado.
 2. ✅ Aba de comando: ordens, PL, recarga, alcance e a IA de tropa seguindo ordens. Entraram também a IA de ordens do líder inimigo (versão 1), o comandante interino e a regra do Líder Supremo (a batalha de teste passou a usar um líder comum). Para o torneio de IA ser justo, a batalha de teste ficou espelhada (mesmo terreno, mesmo bloco de formação dentro dos 5 hex de alcance) e os saqueadores do campo ganharam o cutelo de saque, que bate como a maça. Empates de iniciativa passaram a ser sorteados pela semente, sem favorecer um lado.
    - ✅ **Ordens gritadas** (versão 0.5): a lista de botões com recarga deu lugar à caixa de texto, com o leitor de ordens do jogo (`src/commands.ts`), 13 ordens, alvo preferido, assentamento e estresse.
-3. ✅ Vez de grupo e passagem para iniciativa no contato. A tela anima as marchas de uma vez de grupo juntas, o que reduz bastante a espera nas rodadas de aproximação.
+3. ~~Vez de grupo e passagem para iniciativa no contato.~~ Feita na versão 0.7 e retirada na 0.8: o chefe preferiu que cada um aja pela própria iniciativa desde o início.
 4. Tela de preparação (escolher os líderes, com o Supremo só como último recurso, e distribuir as tropas), regra de 20 por líder (Sobrecarregado e Pressão de liderança), transferências e sucessão entre líderes.
 5. IA de líder versão 2 (simulação), estratégia do lado, escala de 100 contra 100, otimização e Web Worker.
 6. Habilidades das subclasses e traços das tropas.
@@ -451,7 +438,7 @@ Cada pergunta já tem uma proposta. Se o chefe não mudar, a proposta vale.
 | 14 | Transferir tropas em batalha custa PL? Quantas por vez? A queda de moral atinge só quem foi transferido? | 3 PL do líder que recebe, várias tropas de uma vez, dentro do alcance dele. Só as transferidas perdem moral. |
 | 15 | O comandante interino sofre a regra de 20 por líder? | Não. |
 | 16 | Como termina uma batalha de 100 contra 100? Lutar até o último cair é demorado. | Um lado perde quando não tem mais nenhum líder e mais da metade das tropas dele está morta ou em fuga, ou quando o player manda recuar. |
-| 17 | A posição do grupo na fila vem da iniciativa do líder ou da média do grupo? | Iniciativa do líder. |
+| 17 | A posição do grupo na fila vem da iniciativa do líder ou da média do grupo? | Não se aplica mais: sem vez de grupo, cada um entra na fila pela própria iniciativa (versão 0.8). |
 | 18 | Vai ter névoa de guerra? Isso muda bastante a IA. | Não nesta fase. |
 | 19 | Arma de arremesso (dardo, machadinha) conta como arqueiro? | Decidir quando essas armas existirem. |
 | 20 | O Supremo pode ir para a batalha quando ainda há outros líderes disponíveis? | Pode, com confirmação e aviso do risco. A tela sempre sugere os outros líderes primeiro. |
@@ -470,3 +457,4 @@ Cada pergunta já tem uma proposta. Se o chefe não mudar, a proposta vale.
 - **0.5 (2026-11-02)**: ordens gritadas no lugar da lista de ordens com recarga (decisão do chefe). O player escolhe o grupo e escreve a ordem; o leitor do jogo entende 13 ordens, sinônimos e erros de digitação, e devolve o PL quando não entende. A ordem vale até ser trocada, só dá bônus depois de assentar por um turno inteiro, e trocar antes disso causa estresse.
 - **0.6 (2026-11-05)**: planos condicionais (`se… senão`, `quando…`, `até… depois` e grupos separados por ponto e vírgula), detalhados em [ordens-condicionais.md](ordens-condicionais.md). A tropa que aguarda a condição de um plano sem "senão" mantém a posição e revida quem estiver colado nela, em vez de ficar parada sem lutar (pedido do chefe).
 - **0.7 (2026-11-05)**: fase 3. Pelotão fora de combate age em bloco na vez do líder; um golpe dado ou sofrido põe os dois pelotões em combate e quem não agiu passa a agir pela própria iniciativa; uma rodada sem golpes e sem ninguém colado a um inimigo devolve o pelotão à vez de grupo.
+- **0.8 (2026-11-06)**: a vez de grupo saiu (pedido do chefe, que preferiu as iniciativas). Cada combatente volta a agir pela própria iniciativa desde a primeira rodada, intercalando aliados e inimigos, como nas fases 1 e 2. Bustos e planos condicionais continuam.
